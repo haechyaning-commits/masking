@@ -1,0 +1,13 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Node (개발 편의 도구를 쓸 경우)
+node_modules/
+npm-debug.log*
+
+# 로컬 테스트 산출물
+*_masked.pdf
