@@ -19,11 +19,12 @@
 
   const VIEW_SCALE = 1.3, RASTER_SCALE = 2.0;
   const SYMBOL_FONT = '"WenQuanYi Zen Hei", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-  const DISPLAY = [
+  // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
+  const AUTO_CATS = [
     { id: "rrn", label: "주민등록번호" }, { id: "phone", label: "전화번호" },
     { id: "email", label: "이메일" }, { id: "account", label: "계좌번호" },
-    { id: "name", label: "이름·기관" }, { id: "manual", label: "수동 지정" },
   ];
+  const AUTO_IDS = AUTO_CATS.map((c) => c.id);
 
   const state = {
     fileName: "", originalBytes: null, pages: [], dets: [],
@@ -40,6 +41,9 @@
     dlLink: id("dlLink"), dlLink2: id("dlLink2"), previewBtn: id("previewBtn"),
     previewModal: id("previewModal"), pvBody: id("pvBody"), pvClose: id("pvClose"),
     empty: id("empty"), pages: id("pages"), loader: id("loader"), loaderText: id("loaderText"),
+    undoBtn: id("undoBtn"), pvEdit: id("pvEdit"),
+    uploadMeta: id("uploadMeta"), autoMeta: id("autoMeta"), entityMeta: id("entityMeta"),
+    manualMeta: id("manualMeta"), totalMeta: id("totalMeta"),
   };
   function id(x) { return document.getElementById(x); }
   const catColor = (c) => "var(--cat-" + c + ")";
@@ -64,7 +68,8 @@
       const hadText = await processPdf(state.originalBytes.slice(0));
       reDetectEntities(); renderReport();
       [el.reportCard, el.entityCard, el.manualCard, el.dlCard].forEach((c) => (c.hidden = false));
-      el.empty.hidden = true;
+      el.empty.hidden = true; el.undoBtn.hidden = false;
+      el.uploadMeta.textContent = state.pages.length + "쪽";
       if (!hadText) showMessage("이 PDF에서 <b>선택 가능한 텍스트를 찾지 못했습니다.</b> 스캔본(이미지) PDF는 지원하지 않습니다. (OCR 필요)", "warn");
     } catch (err) { console.error(err); showMessage("<b>PDF 처리 중 오류.</b> " + (err && err.message ? err.message : err), "err"); }
     finally { clearTimeout(watchdog); hideLoader(); }
@@ -73,6 +78,8 @@
     state.pages = []; state.dets = []; detIdSeq = 0;
     el.pages.innerHTML = ""; el.cats.innerHTML = ""; el.totalCount.textContent = "0";
     el.result.hidden = true; el.previewModal.hidden = true;
+    history.length = 0; updateUndo(); el.undoBtn.hidden = true;
+    el.autoMeta.textContent = el.entityMeta.textContent = el.manualMeta.textContent = el.totalMeta.textContent = el.uploadMeta.textContent = "";
     if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
   }
 
@@ -151,6 +158,7 @@
     return { item: hit, tStart: s, tEnd: e, token: s0.slice(s, e + 1) };
   }
   function maskToken(rec, tok) {
+    snapshot();
     if (el.sameWord && el.sameWord.checked && tok.token.length >= 1) {
       for (const r of state.pages) {
         let from = 0, idx;
@@ -252,15 +260,15 @@
   }
   function boxesOf(idv) { return document.querySelectorAll('.box[data-det="' + idv + '"]'); }
   function refreshBox(det) { boxesOf(det.id).forEach((b) => { b.classList.toggle("on", det.included); b.classList.toggle("off", !det.included); }); }
-  function toggleDet(idv) { const d = state.dets.find((x) => x.id === idv); if (!d) return; d.included = !d.included; refreshBox(d); renderReport(); }
-  function removeDet(idv) { boxesOf(idv).forEach((b) => b.remove()); state.dets = state.dets.filter((x) => x.id !== idv); renderReport(); }
+  function toggleDet(idv) { const d = state.dets.find((x) => x.id === idv); if (!d) return; snapshot(); d.included = !d.included; refreshBox(d); renderReport(); }
+  function removeDet(idv) { snapshot(); boxesOf(idv).forEach((b) => b.remove()); state.dets = state.dets.filter((x) => x.id !== idv); renderReport(); }
   function removeDetsBySource(src) { state.dets.filter((d) => d.source === src).forEach((d) => boxesOf(d.id).forEach((b) => b.remove())); state.dets = state.dets.filter((d) => d.source !== src); }
   function redrawOverlays() { document.querySelectorAll(".ov").forEach((o) => (o.innerHTML = "")); state.dets.forEach(drawBoxes); }
 
   // ================= 리포트 =================
   function renderReport() {
     el.cats.innerHTML = "";
-    for (const c of DISPLAY) {
+    for (const c of AUTO_CATS) {
       const items = state.dets.filter((d) => d.category === c.id);
       const row = document.createElement("label");
       row.className = "cat" + (items.length === 0 ? " empty" : "");
@@ -268,18 +276,42 @@
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = items.some((d) => d.included); cb.disabled = items.length === 0;
       cb.indeterminate = items.some((d) => d.included) && items.some((d) => !d.included);
-      cb.addEventListener("change", () => { items.forEach((d) => { d.included = cb.checked; refreshBox(d); }); updateTotal(); });
+      cb.addEventListener("change", () => { snapshot(); items.forEach((d) => { d.included = cb.checked; refreshBox(d); }); updateMetas(); updateTotal(); });
       const name = document.createElement("span"); name.className = "cat__name"; name.textContent = c.label;
       const n = document.createElement("span"); n.className = "cat__n"; n.textContent = items.length;
       row.append(cb, name, n); el.cats.appendChild(row);
     }
-    updateTotal();
+    updateMetas(); updateTotal();
   }
-  function updateTotal() { const n = state.dets.filter((d) => d.included).length; el.totalCount.textContent = String(n); el.genBtn.disabled = n === 0; }
+  function cntCat(id) { return state.dets.filter((d) => d.category === id).length; }
+  function updateMetas() {
+    const autoTot = state.dets.filter((d) => AUTO_IDS.includes(d.category)).length;
+    el.autoMeta.textContent = autoTot ? autoTot + "건" : "";
+    const nm = cntCat("name"); el.entityMeta.textContent = nm ? nm + "건" : "";
+    const mn = cntCat("manual"); el.manualMeta.textContent = mn ? mn + "건" : "";
+  }
+  function updateTotal() {
+    const n = state.dets.filter((d) => d.included).length;
+    el.totalCount.textContent = String(n); el.genBtn.disabled = n === 0;
+    el.totalMeta.textContent = n ? n + "건" : "";
+  }
+
+  // ===== 되돌리기(Undo) =====
+  const history = [];
+  function snapshot() { history.push(state.dets.map((d) => ({ ...d }))); if (history.length > 40) history.shift(); updateUndo(); }
+  function undo() { if (!history.length) return; state.dets = history.pop(); redrawOverlays(); renderReport(); updateUndo(); }
+  function updateUndo() { el.undoBtn.disabled = history.length === 0; }
+  el.undoBtn.addEventListener("click", undo);
+
+  // ===== 단계 접기/펼치기 =====
+  document.querySelectorAll(".card > .step").forEach((btn) => btn.addEventListener("click", () => {
+    const card = btn.closest(".card"); card.classList.toggle("collapsed");
+    btn.setAttribute("aria-expanded", String(!card.classList.contains("collapsed")));
+  }));
 
   // ================= 컨트롤 =================
-  el.applyEntities.addEventListener("click", () => { reDetectEntities(); renderReport(); });
-  el.suffixRule.addEventListener("change", () => { reDetectEntities(); renderReport(); });
+  el.applyEntities.addEventListener("click", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
     el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));
@@ -320,6 +352,7 @@
           return;
         }
         if (w < 6 || h < 6) return;
+        snapshot();
         const rect = { x: left / VIEW_SCALE, y: rec.meta.heightPts - (top + h) / VIEW_SCALE, w: w / VIEW_SCALE, h: h / VIEW_SCALE };
         addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
           fullRects: [rect], partialRects: [rect], value: state.manualStyle === "symbol" ? "수동 (문자)" : "수동 (검은박스)" });
@@ -404,6 +437,7 @@
     finally { hideLoader(); }
   }
   el.previewBtn.addEventListener("click", openPreview);
+  el.pvEdit.addEventListener("click", () => { el.previewModal.hidden = true; }); // 검토로 돌아가 수정
   el.pvClose.addEventListener("click", () => { el.previewModal.hidden = true; });
   el.previewModal.addEventListener("click", (e) => { if (e.target === el.previewModal) el.previewModal.hidden = true; });
 })();

@@ -117,24 +117,52 @@ body {
 }
 .stage { flex: 1; min-width: 0; overflow-y: auto; padding: 26px; position: relative; }
 
-/* ===== 카드 ===== */
+/* ===== 카드 (접이식 단계) ===== */
 .card {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden;
+  flex-shrink: 0; /* flex 컬럼에서 카드가 줄어들어 내용이 잘리지 않도록 */
 }
 .card__pad { padding: 15px; }
 .step {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13.5px; font-weight: 700; margin-bottom: 12px;
+  width: 100%; display: flex; align-items: center; gap: 9px;
+  padding: 13px 15px; background: none; border: 0; cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 700; color: var(--ink); text-align: left;
 }
+.step:hover { background: var(--panel-2); }
 .step__n {
-  width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;
-  display: grid; place-items: center;
-  font-size: 11.5px; font-weight: 700;
-  background: var(--accent); color: #fff;
-  font-variant-numeric: tabular-nums;
+  width: 21px; height: 21px; border-radius: 6px; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--accent); color: #fff; font-variant-numeric: tabular-nums;
 }
+.step__t { flex: 1; }
+.step__meta {
+  font-size: 12px; font-weight: 700; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums; background: var(--bg);
+  border: 1px solid var(--border); padding: 1px 8px; border-radius: 999px;
+}
+.step__meta:empty { display: none; }
+.chev { width: 16px; height: 16px; color: var(--ink-faint); transition: transform .15s; flex-shrink: 0; }
+.card.collapsed .chev { transform: rotate(-90deg); }
+.step-body { padding: 0 15px 15px; }
+.card.collapsed .step-body { display: none; }
 .muted { color: var(--ink-muted); font-size: 12.5px; }
+
+/* 되돌리기 버튼 */
+.undo-fab {
+  position: fixed; right: 26px; bottom: 26px; z-index: 40;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 10px 17px; font-family: inherit; font-size: 13px; font-weight: 700;
+  box-shadow: var(--shadow-md); cursor: pointer;
+}
+.undo-fab:hover { border-color: var(--accent); color: var(--accent); }
+.undo-fab:disabled { opacity: .4; cursor: not-allowed; }
+.pv__edit {
+  border: 1px solid var(--border-strong); background: transparent; color: var(--ink);
+  font-family: inherit; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 8px; cursor: pointer;
+}
+.pv__edit:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ===== 드롭존 ===== */
 .drop {
@@ -384,79 +412,86 @@ body {
     <div class="msg" id="msg" hidden></div>
 
     <!-- 1. 업로드 -->
-    <section class="card card__pad">
-      <div class="step"><span class="step__n">1</span> PDF 업로드</div>
-      <label class="drop" id="drop" for="fileInput">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
-        <span class="drop__t">PDF를 끌어다 놓거나 <b>클릭하여 선택</b></span>
-        <span class="drop__h">텍스트 레이어가 있는 PDF만 지원 (스캔본·HWP 제외)</span>
-        <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
-      </label>
-      <p class="fname" id="fname" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-        <span></span>
-      </p>
+    <section class="card" id="uploadCard">
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">1</span><span class="step__t">PDF 업로드</span><span class="step__meta" id="uploadMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <label class="drop" id="drop" for="fileInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+          <span class="drop__t">PDF를 끌어다 놓거나 <b>클릭하여 선택</b></span>
+          <span class="drop__h">텍스트 레이어가 있는 PDF만 지원 (스캔본·HWP 제외)</span>
+          <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+        </label>
+        <p class="fname" id="fname" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span></span></p>
+      </div>
     </section>
 
-    <!-- 2. 번호 자동 탐지 (검은박스) -->
-    <section class="card card__pad" id="reportCard" hidden>
-      <div class="step"><span class="step__n">2</span> 검토 (자동 탐지)</div>
-      <p class="muted" style="margin-bottom:10px">번호류는 <b>검은박스</b>, 이름·기관은 <b>기호(○)</b>로 가려집니다. 오탐은 페이지에서 <b>박스를 클릭</b>해 제외하세요.</p>
-      <div class="cats" id="cats"></div>
+    <!-- 2. 자동 탐지 검토 (번호류만) -->
+    <section class="card" id="reportCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">2</span><span class="step__t">검토 (자동 탐지)</span><span class="step__meta" id="autoMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <p class="muted" style="margin-bottom:10px">규칙으로 자동 탐지한 <b>번호류</b>입니다. 오탐은 페이지에서 <b>박스를 클릭</b>해 제외하세요.</p>
+        <div class="cats" id="cats"></div>
+      </div>
     </section>
 
     <!-- 3. 이름·기관 가리기 (기호) -->
-    <section class="card card__pad" id="entityCard" hidden>
-      <div class="step"><span class="step__n">3</span> 이름·기관 가리기 (기호)</div>
-      <label class="fieldlabel" for="wordList">가릴 단어 목록 <span class="muted">(한 줄에 하나 — 이름, 기관/부서명 등)</span></label>
-      <textarea id="wordList" class="wordlist" rows="3" placeholder="홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
-      <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
-      <div class="symrow">
-        <span class="muted">마스킹 문자</span>
-        <div class="syms" id="symPicker">
-          <button type="button" class="sym on" data-sym="*">*</button>
-          <button type="button" class="sym" data-sym="○">○</button>
-          <button type="button" class="sym" data-sym="●">●</button>
-          <button type="button" class="sym" data-sym="△">△</button>
-          <button type="button" class="sym" data-sym="□">□</button>
-          <button type="button" class="sym" data-sym="♠">♠</button>
+    <section class="card" id="entityCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">3</span><span class="step__t">이름·기관 가리기 (기호)</span><span class="step__meta" id="entityMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <label class="fieldlabel" for="wordList">가릴 단어 목록 <span class="muted">(한 줄에 하나 — 이름, 기관/부서명 등)</span></label>
+        <textarea id="wordList" class="wordlist" rows="4" placeholder="예시)&#10;홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
+        <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
+        <div class="symrow">
+          <span class="muted">마스킹 문자</span>
+          <div class="syms" id="symPicker">
+            <button type="button" class="sym on" data-sym="*">*</button>
+            <button type="button" class="sym" data-sym="○">○</button>
+            <button type="button" class="sym" data-sym="●">●</button>
+            <button type="button" class="sym" data-sym="△">△</button>
+            <button type="button" class="sym" data-sym="□">□</button>
+            <button type="button" class="sym" data-sym="♠">♠</button>
+          </div>
         </div>
+        <button class="btn btn--ghost" id="applyEntities">이름·기관 탐지 적용</button>
       </div>
-      <button class="btn btn--ghost" id="applyEntities">이름·기관 탐지 적용</button>
     </section>
 
-    <!-- 4. 수동 마스킹 -->
-    <section class="card card__pad" id="manualCard" hidden>
-      <div class="step"><span class="step__n">4</span> 직접 지정 (클릭 / 드래그)</div>
-      <p class="muted" style="margin-bottom:10px">자동으로 못 잡은 이름·기관은 모드를 켠 뒤 <b>단어를 클릭</b>하면 마스킹됩니다. 표·도장 등 넓은 영역은 <b>드래그</b>하세요.</p>
-      <button class="btn btn--ghost" id="manualToggle" aria-pressed="false">✏️ 직접 지정 모드 켜기</button>
-      <label class="chk" style="margin-top:10px"><input type="checkbox" id="sameWord" /> <span>같은 단어는 문서 전체에서 <b>함께 가리기</b> (한 번 클릭으로 모든 곳)</span></label>
-      <div class="manual-style" id="manualStyle">
-        <span class="muted">방식</span>
-        <label class="chip"><input type="radio" name="mstyle" value="symbol" checked /> 문자</label>
-        <label class="chip"><input type="radio" name="mstyle" value="box" /> 검은박스</label>
+    <!-- 4. 직접 지정 -->
+    <section class="card" id="manualCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">4</span><span class="step__t">직접 지정 (클릭 / 드래그)</span><span class="step__meta" id="manualMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <p class="muted" style="margin-bottom:10px">자동으로 못 잡은 이름·기관은 모드를 켠 뒤 <b>단어를 클릭</b>하면 마스킹됩니다. 표·도장 등 넓은 영역은 <b>드래그</b>하세요.</p>
+        <button class="btn btn--ghost" id="manualToggle" aria-pressed="false">✏️ 직접 지정 모드 켜기</button>
+        <label class="chk" style="margin-top:10px"><input type="checkbox" id="sameWord" /> <span>같은 단어는 문서 전체에서 <b>함께 가리기</b></span></label>
+        <div class="manual-style" id="manualStyle">
+          <span class="muted">방식</span>
+          <label class="chip"><input type="radio" name="mstyle" value="symbol" checked /> 문자</label>
+          <label class="chip"><input type="radio" name="mstyle" value="box" /> 검은박스</label>
+        </div>
+        <p class="muted" style="margin-top:8px">추가한 항목은 다시 <b>클릭하면 삭제</b>됩니다.</p>
       </div>
-      <p class="muted" style="margin-top:8px">추가된 항목은 다시 <b>클릭하면 삭제</b>됩니다.</p>
     </section>
 
     <!-- 5. 생성 -->
-    <section class="card card__pad" id="dlCard" hidden>
-      <div class="step"><span class="step__n">5</span> 마스킹 PDF 만들기</div>
-      <fieldset class="modes" id="levelPicker">
-        <label class="mode"><input type="radio" name="maskLevel" value="partial" checked /><span><b>부분 마스킹 (표준·권장)</b><small>표준대로 일부만 가림 — 주민번호 뒤 7자리, 전화 뒤 4자리, 이메일 아이디 일부, 계좌 앞 6자리 유지, 이름은 가운데 글자.</small></span></label>
-        <label class="mode"><input type="radio" name="maskLevel" value="full" /><span><b>전체 마스킹</b><small>값 전체를 가림 — 번호는 검은박스, 이름·기관은 마스킹 문자.</small></span></label>
-      </fieldset>
-      <div class="total"><span>포함된 마스킹</span><b id="totalCount">0</b><span>건</span></div>
-      <p class="muted" style="margin:8px 0 12px">결과는 <b>이미지화</b>로 저장되어 원본 글자가 함께 제거됩니다(마스킹 부분 추출 불가).</p>
-      <button class="btn" id="genBtn" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        마스킹 PDF 생성
-      </button>
-      <div class="result" id="result" hidden style="margin-top:11px">
-        <span class="result__ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> 마스킹 완료</span>
-        <button class="btn" id="previewBtn" type="button">👁 결과 미리보기</button>
-        <a class="btn btn--ghost" id="dlLink" download href="#">⬇ 마스킹 PDF 다운로드</a>
-        <p class="muted" id="dlHint" style="margin-top:2px">다운로드가 안 되면(미리보기 전용 환경) 첨부된 <b>독립 실행 파일</b>에서 저장하세요.</p>
+    <section class="card" id="dlCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">5</span><span class="step__t">마스킹 PDF 만들기</span><span class="step__meta" id="totalMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <fieldset class="modes" id="levelPicker">
+          <label class="mode"><input type="radio" name="maskLevel" value="partial" checked /><span><b>부분 마스킹 (표준·권장)</b><small>표준대로 일부만 가림 — 주민번호 뒤 7자리, 전화 뒤 4자리, 이메일 아이디 일부, 계좌 앞 6자리 유지, 이름은 가운데 글자.</small></span></label>
+          <label class="mode"><input type="radio" name="maskLevel" value="full" /><span><b>전체 마스킹</b><small>값 전체를 가림 — 번호는 검은박스, 이름·기관은 마스킹 문자.</small></span></label>
+        </fieldset>
+        <div class="total"><span>포함된 마스킹</span><b id="totalCount">0</b><span>건</span></div>
+        <p class="muted" style="margin:8px 0 12px">결과는 <b>이미지화</b>로 저장되어 원본 글자가 함께 제거됩니다(마스킹 부분 추출 불가).</p>
+        <button class="btn" id="genBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          마스킹 PDF 생성
+        </button>
+        <div class="result" id="result" hidden style="margin-top:11px">
+          <span class="result__ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> 마스킹 완료</span>
+          <button class="btn" id="previewBtn" type="button">👁 결과 미리보기</button>
+          <a class="btn btn--ghost" id="dlLink" download href="#">⬇ 마스킹 PDF 다운로드</a>
+          <p class="muted" id="dlHint" style="margin-top:2px">다운로드가 안 되면(미리보기 전용 환경) 첨부된 <b>독립 실행 파일</b>에서 저장하세요.</p>
+        </div>
       </div>
     </section>
 
@@ -474,10 +509,13 @@ body {
   </main>
 </div>
 
+<button class="undo-fab" id="undoBtn" hidden>↶ 되돌리기</button>
+
 <div class="pv" id="previewModal" hidden>
   <div class="pv__box">
     <div class="pv__head">
       <span>🛡️ 마스킹 결과 미리보기</span>
+      <button class="pv__edit" id="pvEdit" type="button">← 검토로 돌아가 수정</button>
       <a class="pv__dl" id="dlLink2" download href="#">⬇ 다운로드</a>
       <button class="pv__close" id="pvClose" type="button" aria-label="닫기">✕</button>
     </div>
@@ -777,11 +815,12 @@ body {
 
   const VIEW_SCALE = 1.3, RASTER_SCALE = 2.0;
   const SYMBOL_FONT = '"WenQuanYi Zen Hei", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-  const DISPLAY = [
+  // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
+  const AUTO_CATS = [
     { id: "rrn", label: "주민등록번호" }, { id: "phone", label: "전화번호" },
     { id: "email", label: "이메일" }, { id: "account", label: "계좌번호" },
-    { id: "name", label: "이름·기관" }, { id: "manual", label: "수동 지정" },
   ];
+  const AUTO_IDS = AUTO_CATS.map((c) => c.id);
 
   const state = {
     fileName: "", originalBytes: null, pages: [], dets: [],
@@ -798,6 +837,9 @@ body {
     dlLink: id("dlLink"), dlLink2: id("dlLink2"), previewBtn: id("previewBtn"),
     previewModal: id("previewModal"), pvBody: id("pvBody"), pvClose: id("pvClose"),
     empty: id("empty"), pages: id("pages"), loader: id("loader"), loaderText: id("loaderText"),
+    undoBtn: id("undoBtn"), pvEdit: id("pvEdit"),
+    uploadMeta: id("uploadMeta"), autoMeta: id("autoMeta"), entityMeta: id("entityMeta"),
+    manualMeta: id("manualMeta"), totalMeta: id("totalMeta"),
   };
   function id(x) { return document.getElementById(x); }
   const catColor = (c) => "var(--cat-" + c + ")";
@@ -822,7 +864,8 @@ body {
       const hadText = await processPdf(state.originalBytes.slice(0));
       reDetectEntities(); renderReport();
       [el.reportCard, el.entityCard, el.manualCard, el.dlCard].forEach((c) => (c.hidden = false));
-      el.empty.hidden = true;
+      el.empty.hidden = true; el.undoBtn.hidden = false;
+      el.uploadMeta.textContent = state.pages.length + "쪽";
       if (!hadText) showMessage("이 PDF에서 <b>선택 가능한 텍스트를 찾지 못했습니다.</b> 스캔본(이미지) PDF는 지원하지 않습니다. (OCR 필요)", "warn");
     } catch (err) { console.error(err); showMessage("<b>PDF 처리 중 오류.</b> " + (err && err.message ? err.message : err), "err"); }
     finally { clearTimeout(watchdog); hideLoader(); }
@@ -831,6 +874,8 @@ body {
     state.pages = []; state.dets = []; detIdSeq = 0;
     el.pages.innerHTML = ""; el.cats.innerHTML = ""; el.totalCount.textContent = "0";
     el.result.hidden = true; el.previewModal.hidden = true;
+    history.length = 0; updateUndo(); el.undoBtn.hidden = true;
+    el.autoMeta.textContent = el.entityMeta.textContent = el.manualMeta.textContent = el.totalMeta.textContent = el.uploadMeta.textContent = "";
     if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
   }
 
@@ -909,6 +954,7 @@ body {
     return { item: hit, tStart: s, tEnd: e, token: s0.slice(s, e + 1) };
   }
   function maskToken(rec, tok) {
+    snapshot();
     if (el.sameWord && el.sameWord.checked && tok.token.length >= 1) {
       for (const r of state.pages) {
         let from = 0, idx;
@@ -1010,15 +1056,15 @@ body {
   }
   function boxesOf(idv) { return document.querySelectorAll('.box[data-det="' + idv + '"]'); }
   function refreshBox(det) { boxesOf(det.id).forEach((b) => { b.classList.toggle("on", det.included); b.classList.toggle("off", !det.included); }); }
-  function toggleDet(idv) { const d = state.dets.find((x) => x.id === idv); if (!d) return; d.included = !d.included; refreshBox(d); renderReport(); }
-  function removeDet(idv) { boxesOf(idv).forEach((b) => b.remove()); state.dets = state.dets.filter((x) => x.id !== idv); renderReport(); }
+  function toggleDet(idv) { const d = state.dets.find((x) => x.id === idv); if (!d) return; snapshot(); d.included = !d.included; refreshBox(d); renderReport(); }
+  function removeDet(idv) { snapshot(); boxesOf(idv).forEach((b) => b.remove()); state.dets = state.dets.filter((x) => x.id !== idv); renderReport(); }
   function removeDetsBySource(src) { state.dets.filter((d) => d.source === src).forEach((d) => boxesOf(d.id).forEach((b) => b.remove())); state.dets = state.dets.filter((d) => d.source !== src); }
   function redrawOverlays() { document.querySelectorAll(".ov").forEach((o) => (o.innerHTML = "")); state.dets.forEach(drawBoxes); }
 
   // ================= 리포트 =================
   function renderReport() {
     el.cats.innerHTML = "";
-    for (const c of DISPLAY) {
+    for (const c of AUTO_CATS) {
       const items = state.dets.filter((d) => d.category === c.id);
       const row = document.createElement("label");
       row.className = "cat" + (items.length === 0 ? " empty" : "");
@@ -1026,18 +1072,42 @@ body {
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = items.some((d) => d.included); cb.disabled = items.length === 0;
       cb.indeterminate = items.some((d) => d.included) && items.some((d) => !d.included);
-      cb.addEventListener("change", () => { items.forEach((d) => { d.included = cb.checked; refreshBox(d); }); updateTotal(); });
+      cb.addEventListener("change", () => { snapshot(); items.forEach((d) => { d.included = cb.checked; refreshBox(d); }); updateMetas(); updateTotal(); });
       const name = document.createElement("span"); name.className = "cat__name"; name.textContent = c.label;
       const n = document.createElement("span"); n.className = "cat__n"; n.textContent = items.length;
       row.append(cb, name, n); el.cats.appendChild(row);
     }
-    updateTotal();
+    updateMetas(); updateTotal();
   }
-  function updateTotal() { const n = state.dets.filter((d) => d.included).length; el.totalCount.textContent = String(n); el.genBtn.disabled = n === 0; }
+  function cntCat(id) { return state.dets.filter((d) => d.category === id).length; }
+  function updateMetas() {
+    const autoTot = state.dets.filter((d) => AUTO_IDS.includes(d.category)).length;
+    el.autoMeta.textContent = autoTot ? autoTot + "건" : "";
+    const nm = cntCat("name"); el.entityMeta.textContent = nm ? nm + "건" : "";
+    const mn = cntCat("manual"); el.manualMeta.textContent = mn ? mn + "건" : "";
+  }
+  function updateTotal() {
+    const n = state.dets.filter((d) => d.included).length;
+    el.totalCount.textContent = String(n); el.genBtn.disabled = n === 0;
+    el.totalMeta.textContent = n ? n + "건" : "";
+  }
+
+  // ===== 되돌리기(Undo) =====
+  const history = [];
+  function snapshot() { history.push(state.dets.map((d) => ({ ...d }))); if (history.length > 40) history.shift(); updateUndo(); }
+  function undo() { if (!history.length) return; state.dets = history.pop(); redrawOverlays(); renderReport(); updateUndo(); }
+  function updateUndo() { el.undoBtn.disabled = history.length === 0; }
+  el.undoBtn.addEventListener("click", undo);
+
+  // ===== 단계 접기/펼치기 =====
+  document.querySelectorAll(".card > .step").forEach((btn) => btn.addEventListener("click", () => {
+    const card = btn.closest(".card"); card.classList.toggle("collapsed");
+    btn.setAttribute("aria-expanded", String(!card.classList.contains("collapsed")));
+  }));
 
   // ================= 컨트롤 =================
-  el.applyEntities.addEventListener("click", () => { reDetectEntities(); renderReport(); });
-  el.suffixRule.addEventListener("change", () => { reDetectEntities(); renderReport(); });
+  el.applyEntities.addEventListener("click", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
     el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));
@@ -1078,6 +1148,7 @@ body {
           return;
         }
         if (w < 6 || h < 6) return;
+        snapshot();
         const rect = { x: left / VIEW_SCALE, y: rec.meta.heightPts - (top + h) / VIEW_SCALE, w: w / VIEW_SCALE, h: h / VIEW_SCALE };
         addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
           fullRects: [rect], partialRects: [rect], value: state.manualStyle === "symbol" ? "수동 (문자)" : "수동 (검은박스)" });
@@ -1162,6 +1233,7 @@ body {
     finally { hideLoader(); }
   }
   el.previewBtn.addEventListener("click", openPreview);
+  el.pvEdit.addEventListener("click", () => { el.previewModal.hidden = true; }); // 검토로 돌아가 수정
   el.pvClose.addEventListener("click", () => { el.previewModal.hidden = true; });
   el.previewModal.addEventListener("click", (e) => { if (e.target === el.previewModal) el.previewModal.hidden = true; });
 })();

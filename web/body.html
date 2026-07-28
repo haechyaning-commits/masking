@@ -16,79 +16,86 @@
     <div class="msg" id="msg" hidden></div>
 
     <!-- 1. 업로드 -->
-    <section class="card card__pad">
-      <div class="step"><span class="step__n">1</span> PDF 업로드</div>
-      <label class="drop" id="drop" for="fileInput">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
-        <span class="drop__t">PDF를 끌어다 놓거나 <b>클릭하여 선택</b></span>
-        <span class="drop__h">텍스트 레이어가 있는 PDF만 지원 (스캔본·HWP 제외)</span>
-        <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
-      </label>
-      <p class="fname" id="fname" hidden>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-        <span></span>
-      </p>
+    <section class="card" id="uploadCard">
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">1</span><span class="step__t">PDF 업로드</span><span class="step__meta" id="uploadMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <label class="drop" id="drop" for="fileInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+          <span class="drop__t">PDF를 끌어다 놓거나 <b>클릭하여 선택</b></span>
+          <span class="drop__h">텍스트 레이어가 있는 PDF만 지원 (스캔본·HWP 제외)</span>
+          <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+        </label>
+        <p class="fname" id="fname" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span></span></p>
+      </div>
     </section>
 
-    <!-- 2. 번호 자동 탐지 (검은박스) -->
-    <section class="card card__pad" id="reportCard" hidden>
-      <div class="step"><span class="step__n">2</span> 검토 (자동 탐지)</div>
-      <p class="muted" style="margin-bottom:10px">번호류는 <b>검은박스</b>, 이름·기관은 <b>기호(○)</b>로 가려집니다. 오탐은 페이지에서 <b>박스를 클릭</b>해 제외하세요.</p>
-      <div class="cats" id="cats"></div>
+    <!-- 2. 자동 탐지 검토 (번호류만) -->
+    <section class="card" id="reportCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">2</span><span class="step__t">검토 (자동 탐지)</span><span class="step__meta" id="autoMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <p class="muted" style="margin-bottom:10px">규칙으로 자동 탐지한 <b>번호류</b>입니다. 오탐은 페이지에서 <b>박스를 클릭</b>해 제외하세요.</p>
+        <div class="cats" id="cats"></div>
+      </div>
     </section>
 
     <!-- 3. 이름·기관 가리기 (기호) -->
-    <section class="card card__pad" id="entityCard" hidden>
-      <div class="step"><span class="step__n">3</span> 이름·기관 가리기 (기호)</div>
-      <label class="fieldlabel" for="wordList">가릴 단어 목록 <span class="muted">(한 줄에 하나 — 이름, 기관/부서명 등)</span></label>
-      <textarea id="wordList" class="wordlist" rows="3" placeholder="홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
-      <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
-      <div class="symrow">
-        <span class="muted">마스킹 문자</span>
-        <div class="syms" id="symPicker">
-          <button type="button" class="sym on" data-sym="*">*</button>
-          <button type="button" class="sym" data-sym="○">○</button>
-          <button type="button" class="sym" data-sym="●">●</button>
-          <button type="button" class="sym" data-sym="△">△</button>
-          <button type="button" class="sym" data-sym="□">□</button>
-          <button type="button" class="sym" data-sym="♠">♠</button>
+    <section class="card" id="entityCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">3</span><span class="step__t">이름·기관 가리기 (기호)</span><span class="step__meta" id="entityMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <label class="fieldlabel" for="wordList">가릴 단어 목록 <span class="muted">(한 줄에 하나 — 이름, 기관/부서명 등)</span></label>
+        <textarea id="wordList" class="wordlist" rows="4" placeholder="예시)&#10;홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
+        <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
+        <div class="symrow">
+          <span class="muted">마스킹 문자</span>
+          <div class="syms" id="symPicker">
+            <button type="button" class="sym on" data-sym="*">*</button>
+            <button type="button" class="sym" data-sym="○">○</button>
+            <button type="button" class="sym" data-sym="●">●</button>
+            <button type="button" class="sym" data-sym="△">△</button>
+            <button type="button" class="sym" data-sym="□">□</button>
+            <button type="button" class="sym" data-sym="♠">♠</button>
+          </div>
         </div>
+        <button class="btn btn--ghost" id="applyEntities">이름·기관 탐지 적용</button>
       </div>
-      <button class="btn btn--ghost" id="applyEntities">이름·기관 탐지 적용</button>
     </section>
 
-    <!-- 4. 수동 마스킹 -->
-    <section class="card card__pad" id="manualCard" hidden>
-      <div class="step"><span class="step__n">4</span> 직접 지정 (클릭 / 드래그)</div>
-      <p class="muted" style="margin-bottom:10px">자동으로 못 잡은 이름·기관은 모드를 켠 뒤 <b>단어를 클릭</b>하면 마스킹됩니다. 표·도장 등 넓은 영역은 <b>드래그</b>하세요.</p>
-      <button class="btn btn--ghost" id="manualToggle" aria-pressed="false">✏️ 직접 지정 모드 켜기</button>
-      <label class="chk" style="margin-top:10px"><input type="checkbox" id="sameWord" /> <span>같은 단어는 문서 전체에서 <b>함께 가리기</b> (한 번 클릭으로 모든 곳)</span></label>
-      <div class="manual-style" id="manualStyle">
-        <span class="muted">방식</span>
-        <label class="chip"><input type="radio" name="mstyle" value="symbol" checked /> 문자</label>
-        <label class="chip"><input type="radio" name="mstyle" value="box" /> 검은박스</label>
+    <!-- 4. 직접 지정 -->
+    <section class="card" id="manualCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">4</span><span class="step__t">직접 지정 (클릭 / 드래그)</span><span class="step__meta" id="manualMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <p class="muted" style="margin-bottom:10px">자동으로 못 잡은 이름·기관은 모드를 켠 뒤 <b>단어를 클릭</b>하면 마스킹됩니다. 표·도장 등 넓은 영역은 <b>드래그</b>하세요.</p>
+        <button class="btn btn--ghost" id="manualToggle" aria-pressed="false">✏️ 직접 지정 모드 켜기</button>
+        <label class="chk" style="margin-top:10px"><input type="checkbox" id="sameWord" /> <span>같은 단어는 문서 전체에서 <b>함께 가리기</b></span></label>
+        <div class="manual-style" id="manualStyle">
+          <span class="muted">방식</span>
+          <label class="chip"><input type="radio" name="mstyle" value="symbol" checked /> 문자</label>
+          <label class="chip"><input type="radio" name="mstyle" value="box" /> 검은박스</label>
+        </div>
+        <p class="muted" style="margin-top:8px">추가한 항목은 다시 <b>클릭하면 삭제</b>됩니다.</p>
       </div>
-      <p class="muted" style="margin-top:8px">추가된 항목은 다시 <b>클릭하면 삭제</b>됩니다.</p>
     </section>
 
     <!-- 5. 생성 -->
-    <section class="card card__pad" id="dlCard" hidden>
-      <div class="step"><span class="step__n">5</span> 마스킹 PDF 만들기</div>
-      <fieldset class="modes" id="levelPicker">
-        <label class="mode"><input type="radio" name="maskLevel" value="partial" checked /><span><b>부분 마스킹 (표준·권장)</b><small>표준대로 일부만 가림 — 주민번호 뒤 7자리, 전화 뒤 4자리, 이메일 아이디 일부, 계좌 앞 6자리 유지, 이름은 가운데 글자.</small></span></label>
-        <label class="mode"><input type="radio" name="maskLevel" value="full" /><span><b>전체 마스킹</b><small>값 전체를 가림 — 번호는 검은박스, 이름·기관은 마스킹 문자.</small></span></label>
-      </fieldset>
-      <div class="total"><span>포함된 마스킹</span><b id="totalCount">0</b><span>건</span></div>
-      <p class="muted" style="margin:8px 0 12px">결과는 <b>이미지화</b>로 저장되어 원본 글자가 함께 제거됩니다(마스킹 부분 추출 불가).</p>
-      <button class="btn" id="genBtn" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        마스킹 PDF 생성
-      </button>
-      <div class="result" id="result" hidden style="margin-top:11px">
-        <span class="result__ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> 마스킹 완료</span>
-        <button class="btn" id="previewBtn" type="button">👁 결과 미리보기</button>
-        <a class="btn btn--ghost" id="dlLink" download href="#">⬇ 마스킹 PDF 다운로드</a>
-        <p class="muted" id="dlHint" style="margin-top:2px">다운로드가 안 되면(미리보기 전용 환경) 첨부된 <b>독립 실행 파일</b>에서 저장하세요.</p>
+    <section class="card" id="dlCard" hidden>
+      <button class="step" type="button" aria-expanded="true"><span class="step__n">5</span><span class="step__t">마스킹 PDF 만들기</span><span class="step__meta" id="totalMeta"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <fieldset class="modes" id="levelPicker">
+          <label class="mode"><input type="radio" name="maskLevel" value="partial" checked /><span><b>부분 마스킹 (표준·권장)</b><small>표준대로 일부만 가림 — 주민번호 뒤 7자리, 전화 뒤 4자리, 이메일 아이디 일부, 계좌 앞 6자리 유지, 이름은 가운데 글자.</small></span></label>
+          <label class="mode"><input type="radio" name="maskLevel" value="full" /><span><b>전체 마스킹</b><small>값 전체를 가림 — 번호는 검은박스, 이름·기관은 마스킹 문자.</small></span></label>
+        </fieldset>
+        <div class="total"><span>포함된 마스킹</span><b id="totalCount">0</b><span>건</span></div>
+        <p class="muted" style="margin:8px 0 12px">결과는 <b>이미지화</b>로 저장되어 원본 글자가 함께 제거됩니다(마스킹 부분 추출 불가).</p>
+        <button class="btn" id="genBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          마스킹 PDF 생성
+        </button>
+        <div class="result" id="result" hidden style="margin-top:11px">
+          <span class="result__ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> 마스킹 완료</span>
+          <button class="btn" id="previewBtn" type="button">👁 결과 미리보기</button>
+          <a class="btn btn--ghost" id="dlLink" download href="#">⬇ 마스킹 PDF 다운로드</a>
+          <p class="muted" id="dlHint" style="margin-top:2px">다운로드가 안 되면(미리보기 전용 환경) 첨부된 <b>독립 실행 파일</b>에서 저장하세요.</p>
+        </div>
       </div>
     </section>
 
@@ -106,10 +113,13 @@
   </main>
 </div>
 
+<button class="undo-fab" id="undoBtn" hidden>↶ 되돌리기</button>
+
 <div class="pv" id="previewModal" hidden>
   <div class="pv__box">
     <div class="pv__head">
       <span>🛡️ 마스킹 결과 미리보기</span>
+      <button class="pv__edit" id="pvEdit" type="button">← 검토로 돌아가 수정</button>
       <a class="pv__dl" id="dlLink2" download href="#">⬇ 다운로드</a>
       <button class="pv__close" id="pvClose" type="button" aria-label="닫기">✕</button>
     </div>
