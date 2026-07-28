@@ -88,6 +88,8 @@
       const pw = await renderPage(page, pageIndex);
       const { text, charMap, items } = await extractText(page);
       if (text.trim()) hadText = true;
+      // 각 텍스트 조각의 실제 임베드 폰트명을 저장 → 마스킹 위치를 정확히 측정
+      for (const item of items) { try { const fo = page.commonObjs.get(item.fontName); if (fo && fo.loadedName) item._font = fo.loadedName; } catch (e) {} }
       const rec = { pageIndex, meta, text, charMap, items, ov: pw._ov, pw };
       state.pages.push(rec); enableManualDrag(rec);
       for (const m of detect(text)) {
@@ -183,11 +185,11 @@
     const x0 = t[4], yBaseline = t[5];
     const fontHeight = Math.hypot(t[2], t[3]) || Math.hypot(t[0], t[1]) || 10;
     const str = item.str, totalWidth = item.width || fontHeight * (str.length || 1);
-    _mc.font = "32px sans-serif";
+    _mc.font = '32px ' + (item._font ? '"' + item._font + '"' : "sans-serif"); // 실제 폰트로 측정
     const measuredFull = _mc.measureText(str).width || 1, scale = totalWidth / measuredFull;
     const preWidth = _mc.measureText(str.slice(0, startOffset)).width * scale;
     const matchWidth = _mc.measureText(str.slice(startOffset, endOffset + 1)).width * scale;
-    const descent = fontHeight * 0.25, padX = fontHeight * 0.06;
+    const descent = fontHeight * 0.25, padX = fontHeight * 0.11;
     return { x: x0 + preWidth - padX, y: yBaseline - descent, w: matchWidth + padX * 2, h: fontHeight * 1.2, chars: endOffset - startOffset + 1 };
   }
 
