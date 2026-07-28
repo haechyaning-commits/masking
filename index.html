@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>개인정보 마스킹 도구 (MVP)</title>
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- pdf.js: PDF 텍스트/좌표 추출 및 페이지 렌더링 (로컬 벤더링 — 오프라인/사내망 대응) -->
+  <script src="vendor/pdf.min.js"></script>
+  <!-- pdf-lib: 마스킹 도형 삽입 및 PDF 저장 -->
+  <script src="vendor/pdf-lib.min.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__title">
+      <span class="app-header__logo">🛡️</span>
+      <div>
+        <h1>공공감사포털 업로드 전 개인정보 마스킹 도구</h1>
+        <p class="app-header__subtitle">규칙 기반 자동 탐지 · 사람 최종 확인 · 브라우저 단독 실행 (MVP)</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- 좌측 패널: 업로드 · 탐지 요약 · 다운로드 -->
+    <aside class="sidebar" id="sidebar">
+      <section class="panel">
+        <h2 class="panel__title">1. PDF 업로드</h2>
+        <label id="dropZone" class="dropzone" for="fileInput">
+          <span class="dropzone__icon">📄</span>
+          <span class="dropzone__text">PDF 파일을 여기에 끌어다 놓거나<br /><b>클릭하여 선택</b></span>
+          <span class="dropzone__hint">텍스트 레이어가 있는 PDF만 지원 (스캔본·HWP 제외)</span>
+          <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+        </label>
+        <p class="file-name" id="fileName" hidden></p>
+      </section>
+
+      <section class="panel" id="summaryPanel" hidden>
+        <h2 class="panel__title">2. 탐지 결과 검토</h2>
+        <p class="panel__desc">오탐으로 보이는 항목은 페이지에서 클릭하여 제외하세요. 카테고리 전체를 한 번에 켜고 끌 수도 있습니다.</p>
+        <ul class="cat-list" id="catList"></ul>
+        <div class="summary-total">
+          <span>마스킹 대상</span>
+          <strong id="totalCount">0</strong>
+          <span>건</span>
+        </div>
+      </section>
+
+      <section class="panel" id="downloadPanel" hidden>
+        <h2 class="panel__title">3. 마스킹 PDF 다운로드</h2>
+        <fieldset class="mode-select">
+          <legend>마스킹 방식</legend>
+          <label class="mode-option">
+            <input type="radio" name="maskMode" value="raster" checked />
+            <span>
+              <b>완전 제거 (권장)</b>
+              <small>페이지를 이미지로 평면화하여 텍스트 레이어를 완전히 제거합니다. 마스킹된 글자가 추출·복사되지 않습니다. (검색 불가, 용량 증가)</small>
+            </span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="maskMode" value="vector" />
+            <span>
+              <b>검은 박스만</b>
+              <small>탐지 위치에 검은 사각형만 그립니다. 텍스트 레이어는 유지되지만 <mark>박스 아래 원본 글자가 그대로 남아 추출될 수 있습니다.</mark> 위험을 이해한 경우에만 사용하세요.</small>
+            </span>
+          </label>
+        </fieldset>
+        <button class="btn btn--primary" id="downloadBtn">🔒 마스킹 PDF 다운로드</button>
+      </section>
+
+      <section class="panel panel--note">
+        <p>⚠️ 이 도구는 <b>1차 필터링 도구</b>입니다. 이름·주소 등 비정형 정보는 탐지하지 못하며, 정규식 특성상 오탐·누락이 있을 수 있습니다. 다운로드한 파일을 <b>반드시 육안으로 최종 확인</b>한 뒤 업로드하세요.</p>
+      </section>
+    </aside>
+
+    <!-- 우측: PDF 페이지 렌더링 + 탐지 오버레이 -->
+    <section class="viewer" id="viewer">
+      <div class="viewer__empty" id="viewerEmpty">
+        <span class="viewer__empty-icon">🔍</span>
+        <p>PDF를 업로드하면 개인정보 후보가 자동으로 탐지되어 페이지 위에 표시됩니다.</p>
+      </div>
+      <div class="pages" id="pages"></div>
+    </section>
+  </main>
+
+  <!-- 처리 상태 오버레이 -->
+  <div class="loader" id="loader" hidden>
+    <div class="loader__box">
+      <div class="spinner"></div>
+      <p id="loaderText">처리 중…</p>
+    </div>
+  </div>
+
+  <script src="js/detectors.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
