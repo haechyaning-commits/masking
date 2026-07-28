@@ -299,6 +299,9 @@ body {
   border-radius: var(--radius); padding: 13px 14px;
 }
 .note b { color: var(--warn); }
+.seclist { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.55; color: var(--ink-muted); }
+.seclist b { color: var(--ink); }
+.seclist li::marker { color: var(--good); }
 
 /* ===== 문서 스테이지 ===== */
 .stage-empty {
@@ -497,6 +500,20 @@ body {
 
     <section class="note">
       ⚠️ 이 도구는 <b>1차 필터링 도구</b>입니다. 자동 탐지는 오탐·누락이 있을 수 있으니, 다운로드한 파일을 <b>반드시 육안으로 최종 확인</b>한 뒤 업로드하세요.
+    </section>
+
+    <section class="card collapsed" id="secCard">
+      <button class="step" type="button" aria-expanded="false"><span class="step__t">🔒 보안 — 데이터를 어떻게 지키나요?</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <ul class="seclist">
+          <li><b>파일이 서버로 전송되지 않습니다.</b> 업로드·탐지·마스킹 모두 브라우저 안에서만 처리됩니다.</li>
+          <li>코드에 <b>네트워크 전송(업로드·fetch 등)이 전혀 없습니다.</b> 필요한 라이브러리도 파일 안에 포함(외부 CDN 없음).</li>
+          <li><b>인터넷을 꺼도 동작합니다.</b> → 데이터가 밖으로 나가지 않는다는 증거입니다. (네트워크 차단 후 사용해 직접 확인하세요.)</li>
+          <li>마스킹된 부분은 결과에서 <b>추출·복사되지 않습니다</b>(이미지화로 원본 글자 제거).</li>
+          <li>원본 <b>작성자·제목 등 메타데이터도 제거</b>됩니다.</li>
+          <li>가장 안전하게: 실데이터는 <b>내려받은 파일(로컬)</b>로 사용하세요.</li>
+        </ul>
+      </div>
     </section>
   </aside>
 
@@ -993,8 +1010,8 @@ body {
     const measuredFull = _mc.measureText(str).width || 1, scale = totalWidth / measuredFull;
     const preWidth = _mc.measureText(str.slice(0, startOffset)).width * scale;
     const matchWidth = _mc.measureText(str.slice(startOffset, endOffset + 1)).width * scale;
-    const descent = fontHeight * 0.25, padX = fontHeight * 0.11;
-    return { x: x0 + preWidth - padX, y: yBaseline - descent, w: matchWidth + padX * 2, h: fontHeight * 1.2, chars: endOffset - startOffset + 1 };
+    // 검토 박스는 글자에 딱 맞게(여백 없음). 출력 커버 여백은 buildRaster에서 추가.
+    return { x: x0 + preWidth, y: yBaseline - fontHeight * 0.2, w: matchWidth, h: fontHeight * 1.06, chars: endOffset - startOffset + 1 };
   }
 
   // ===== 부분 마스킹 표준 규칙: 가릴 하위 범위 [a,b) 반환 =====
@@ -1040,7 +1057,8 @@ body {
   function drawBoxes(det) {
     const rec = pageRec(det.pageIndex); if (!rec) return;
     const meta = rec.meta;
-    for (const r of activeRects(det)) {
+    // 검토 오버레이는 '탐지된 전체'를 표시(확인용). 실제 부분 마스킹은 출력에만 적용.
+    for (const r of det.fullRects) {
       const box = document.createElement("div");
       box.className = "box " + (det.included ? "on" : "off") + (det.style === "symbol" ? " symbol" : "") + (det.source === "manual" ? " manual" : "");
       box.style.borderColor = catColor(det.category);
@@ -1170,6 +1188,11 @@ body {
   async function buildRaster(included) {
     const { PDFDocument } = PDFLib;
     const out = await PDFDocument.create();
+    // 보안: 원본 메타데이터(작성자·제목 등)를 남기지 않도록 새 문서 메타데이터를 비운다.
+    try {
+      out.setTitle(""); out.setAuthor(""); out.setSubject(""); out.setKeywords([]);
+      out.setProducer("개인정보 마스킹 도구"); out.setCreator("개인정보 마스킹 도구");
+    } catch (e) {}
     const pdf = await pdfjsLib.getDocument({ data: state.originalBytes.slice(0) }).promise;
     for (let n = 1; n <= pdf.numPages; n++) {
       showLoader(`이미지화 중… (${n}/${pdf.numPages})`);
@@ -1186,15 +1209,17 @@ body {
         const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
         for (const r of activeRects(det)) {
           const rx = r.x * RASTER_SCALE, ry = (meta.heightPts - (r.y + r.h)) * RASTER_SCALE, rw = r.w * RASTER_SCALE, rh = r.h * RASTER_SCALE;
-          if (useChar) drawChars(ctx, rx, ry, rw, rh, r.chars);
-          else { ctx.fillStyle = "#000"; ctx.fillRect(rx, ry, rw, rh); }
+          // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠)
+          const pad = rh * 0.16, fx = rx - pad, fy = ry - rh * 0.06, fw = rw + pad * 2, fh2 = rh + rh * 0.12;
+          if (useChar) drawChars(ctx, fx, fy, fw, fh2, r.chars);
+          else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
         }
       }
       const png = await new Promise((res, rej) => canvas.toBlob((b) => b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("canvas")), "image/png"));
       const img = await out.embedPng(png);
       out.addPage([meta.widthPts, meta.heightPts]).drawImage(img, { x: 0, y: 0, width: meta.widthPts, height: meta.heightPts });
     }
-    return out.save();
+    return out.save({ updateMetadata: false }); // 위에서 비운 메타데이터 유지
   }
 
   // 흰색으로 덮고 마스킹 문자를 채워 넣는다

@@ -102,6 +102,20 @@
     <section class="note">
       ⚠️ 이 도구는 <b>1차 필터링 도구</b>입니다. 자동 탐지는 오탐·누락이 있을 수 있으니, 다운로드한 파일을 <b>반드시 육안으로 최종 확인</b>한 뒤 업로드하세요.
     </section>
+
+    <section class="card collapsed" id="secCard">
+      <button class="step" type="button" aria-expanded="false"><span class="step__t">🔒 보안 — 데이터를 어떻게 지키나요?</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="step-body">
+        <ul class="seclist">
+          <li><b>파일이 서버로 전송되지 않습니다.</b> 업로드·탐지·마스킹 모두 브라우저 안에서만 처리됩니다.</li>
+          <li>코드에 <b>네트워크 전송(업로드·fetch 등)이 전혀 없습니다.</b> 필요한 라이브러리도 파일 안에 포함(외부 CDN 없음).</li>
+          <li><b>인터넷을 꺼도 동작합니다.</b> → 데이터가 밖으로 나가지 않는다는 증거입니다. (네트워크 차단 후 사용해 직접 확인하세요.)</li>
+          <li>마스킹된 부분은 결과에서 <b>추출·복사되지 않습니다</b>(이미지화로 원본 글자 제거).</li>
+          <li>원본 <b>작성자·제목 등 메타데이터도 제거</b>됩니다.</li>
+          <li>가장 안전하게: 실데이터는 <b>내려받은 파일(로컬)</b>로 사용하세요.</li>
+        </ul>
+      </div>
+    </section>
   </aside>
 
   <main class="stage">

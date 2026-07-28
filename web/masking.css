@@ -298,6 +298,9 @@ body {
   border-radius: var(--radius); padding: 13px 14px;
 }
 .note b { color: var(--warn); }
+.seclist { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.55; color: var(--ink-muted); }
+.seclist b { color: var(--ink); }
+.seclist li::marker { color: var(--good); }
 
 /* ===== 문서 스테이지 ===== */
 .stage-empty {

@@ -197,8 +197,8 @@
     const measuredFull = _mc.measureText(str).width || 1, scale = totalWidth / measuredFull;
     const preWidth = _mc.measureText(str.slice(0, startOffset)).width * scale;
     const matchWidth = _mc.measureText(str.slice(startOffset, endOffset + 1)).width * scale;
-    const descent = fontHeight * 0.25, padX = fontHeight * 0.11;
-    return { x: x0 + preWidth - padX, y: yBaseline - descent, w: matchWidth + padX * 2, h: fontHeight * 1.2, chars: endOffset - startOffset + 1 };
+    // 검토 박스는 글자에 딱 맞게(여백 없음). 출력 커버 여백은 buildRaster에서 추가.
+    return { x: x0 + preWidth, y: yBaseline - fontHeight * 0.2, w: matchWidth, h: fontHeight * 1.06, chars: endOffset - startOffset + 1 };
   }
 
   // ===== 부분 마스킹 표준 규칙: 가릴 하위 범위 [a,b) 반환 =====
@@ -244,7 +244,8 @@
   function drawBoxes(det) {
     const rec = pageRec(det.pageIndex); if (!rec) return;
     const meta = rec.meta;
-    for (const r of activeRects(det)) {
+    // 검토 오버레이는 '탐지된 전체'를 표시(확인용). 실제 부분 마스킹은 출력에만 적용.
+    for (const r of det.fullRects) {
       const box = document.createElement("div");
       box.className = "box " + (det.included ? "on" : "off") + (det.style === "symbol" ? " symbol" : "") + (det.source === "manual" ? " manual" : "");
       box.style.borderColor = catColor(det.category);
@@ -374,6 +375,11 @@
   async function buildRaster(included) {
     const { PDFDocument } = PDFLib;
     const out = await PDFDocument.create();
+    // 보안: 원본 메타데이터(작성자·제목 등)를 남기지 않도록 새 문서 메타데이터를 비운다.
+    try {
+      out.setTitle(""); out.setAuthor(""); out.setSubject(""); out.setKeywords([]);
+      out.setProducer("개인정보 마스킹 도구"); out.setCreator("개인정보 마스킹 도구");
+    } catch (e) {}
     const pdf = await pdfjsLib.getDocument({ data: state.originalBytes.slice(0) }).promise;
     for (let n = 1; n <= pdf.numPages; n++) {
       showLoader(`이미지화 중… (${n}/${pdf.numPages})`);
@@ -390,15 +396,17 @@
         const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
         for (const r of activeRects(det)) {
           const rx = r.x * RASTER_SCALE, ry = (meta.heightPts - (r.y + r.h)) * RASTER_SCALE, rw = r.w * RASTER_SCALE, rh = r.h * RASTER_SCALE;
-          if (useChar) drawChars(ctx, rx, ry, rw, rh, r.chars);
-          else { ctx.fillStyle = "#000"; ctx.fillRect(rx, ry, rw, rh); }
+          // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠)
+          const pad = rh * 0.16, fx = rx - pad, fy = ry - rh * 0.06, fw = rw + pad * 2, fh2 = rh + rh * 0.12;
+          if (useChar) drawChars(ctx, fx, fy, fw, fh2, r.chars);
+          else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
         }
       }
       const png = await new Promise((res, rej) => canvas.toBlob((b) => b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("canvas")), "image/png"));
       const img = await out.embedPng(png);
       out.addPage([meta.widthPts, meta.heightPts]).drawImage(img, { x: 0, y: 0, width: meta.widthPts, height: meta.heightPts });
     }
-    return out.save();
+    return out.save({ updateMetadata: false }); // 위에서 비운 메타데이터 유지
   }
 
   // 흰색으로 덮고 마스킹 문자를 채워 넣는다
