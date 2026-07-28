@@ -124,5 +124,82 @@
     return accepted;
   }
 
-  global.PIIDetector = { CATEGORIES, detect };
+  // ================================================================
+  // 비정형 정보(기관·부서·시설명, 사람 이름) 탐지 — 기호 치환용
+  //  · 형식이 없어 정규식으로 못 잡으므로: (1) 사용자가 입력한 단어 목록,
+  //    (2) 조직 접미어 규칙(센터/사무소/과 등으로 끝나는 이름의 앞부분)으로 찾는다.
+  //  · 반환: [{ start, end, maskStart, maskEnd, kind }]
+  //    maskStart~maskEnd 만 기호로 가리고 접미어(센터 등)는 남긴다.
+  // ================================================================
+
+  // 접미어(길이 긴 것부터 매칭). 조직/시설/부서에서 흔한 일반명사.
+  const ORG_SUFFIXES = [
+    "관리사무소", "주식회사", "유한회사", "어린이집", "대학교", "연구원", "연구소",
+    "위원회", "출장소", "사무소", "사무국", "관리단", "관리소", "유치원", "지방청",
+    "센터", "지사", "지점", "지부", "지회", "본부", "본청", "구청", "시청", "도청",
+    "군청", "병원", "의원", "학교", "대학", "조합", "공사", "공단", "재단", "법인",
+    "협회", "은행", "지구대", "파출소", "경찰서", "소방서", "교육청", "우체국",
+    "청", "과", "팀", "실", "국", "부", "관", "원",
+  ];
+
+  const HANGUL = /[가-힣]/;
+
+  /** 문자열 끝에서 알려진 접미어를 찾아 길이를 반환 (없으면 0) */
+  function trailingSuffixLen(word) {
+    for (const s of ORG_SUFFIXES) {
+      if (word.length > s.length && word.endsWith(s)) return s.length;
+    }
+    return 0;
+  }
+
+  /**
+   * @param {string} text  페이지 텍스트
+   * @param {object} opts  { words: string[], useSuffixRule: boolean }
+   */
+  function findEntities(text, opts) {
+    if (!text) return [];
+    opts = opts || {};
+    const words = (opts.words || []).map((w) => w.trim()).filter(Boolean);
+    const results = [];
+
+    // (1) 사용자 지정 단어 목록: 문서 전체에서 모든 출현을 찾음
+    for (const w of words) {
+      let from = 0, idx;
+      while ((idx = text.indexOf(w, from)) !== -1) {
+        const end = idx + w.length;
+        const sufLen = trailingSuffixLen(w); // 접미어가 있으면 남김
+        results.push({ start: idx, end, maskStart: idx, maskEnd: end - sufLen, kind: "list" });
+        from = idx + 1;
+      }
+    }
+
+    // (2) 접미어 규칙: 접미어 바로 앞의 한글 고유명사 덩어리를 가림
+    if (opts.useSuffixRule) {
+      for (const suf of ORG_SUFFIXES) {
+        if (suf.length < 2) continue; // 1글자 접미어(과/청 등)는 오탐이 커서 규칙 자동에서는 제외
+        let from = 0, idx;
+        while ((idx = text.indexOf(suf, from)) !== -1) {
+          from = idx + suf.length;
+          // 앞으로 한글이 연속되는 만큼 고유명사로 간주 (최대 15자)
+          let s = idx;
+          while (s > 0 && HANGUL.test(text[s - 1]) && idx - s < 15) s--;
+          if (s < idx) {
+            results.push({ start: s, end: idx + suf.length, maskStart: s, maskEnd: idx, kind: "suffix" });
+          }
+        }
+      }
+    }
+
+    // 겹침 정리: 시작이 이르고 길이가 긴 것 우선, 겹치면 뒤 후보 버림
+    results.sort((a, b) => (a.start - b.start) || (b.end - a.end));
+    const out = [];
+    for (const r of results) {
+      if (r.maskEnd <= r.maskStart) continue;
+      if (out.some((a) => r.start < a.end && a.start < r.end)) continue;
+      out.push(r);
+    }
+    return out;
+  }
+
+  global.PIIDetector = { CATEGORIES, detect, findEntities, ORG_SUFFIXES };
 })(window);
