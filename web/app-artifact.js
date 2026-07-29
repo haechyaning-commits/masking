@@ -28,7 +28,7 @@
 
   const state = {
     fileName: "", originalBytes: null, pages: [], dets: [],
-    maskChar: "*", maskLevel: "partial", manualMode: false, manualStyle: "box",
+    maskChars: ["*"], maskLevel: "partial", manualMode: false, manualStyle: "box",
   };
   let detIdSeq = 0, lastUrl = null, lastBytes = null;
 
@@ -315,8 +315,11 @@
   el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
-    el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));
-    b.classList.add("on"); state.maskChar = b.dataset.sym;
+    // 여러 마스킹 문자를 함께 선택 가능(선택한 문자들을 섞어서 적용). 최소 1개는 유지.
+    b.classList.toggle("on");
+    let chosen = [...el.symPicker.querySelectorAll(".sym.on")];
+    if (!chosen.length) { b.classList.add("on"); chosen = [b]; }
+    state.maskChars = chosen.map((x) => x.dataset.sym);
   });
   document.querySelectorAll('input[name="maskLevel"]').forEach((r) => r.addEventListener("change", () => { if (r.checked) { state.maskLevel = r.value; redrawOverlays(); } }));
   el.manualToggle.addEventListener("click", () => {
@@ -326,6 +329,8 @@
     state.pages.forEach((p) => p.pw.classList.toggle("manual-on", state.manualMode));
   });
   document.querySelectorAll('input[name="mstyle"]').forEach((r) => r.addEventListener("change", () => { if (r.checked) state.manualStyle = r.value; }));
+  // 초기값을 실제 선택된 라디오와 동기화(기본 '문자'가 선택돼 있어도 change 이벤트가 없어 box로 남던 문제 수정)
+  (() => { const c = document.querySelector('input[name="mstyle"]:checked'); if (c) state.manualStyle = c.value; })();
 
   function enableManualDrag(rec) {
     const ov = rec.ov; let startX, startY, tempEl = null;
@@ -418,7 +423,12 @@
     // 가려진 글자 수만큼 정확히 채움(없으면 폭으로 근사 — 드래그 영역 등)
     const n = chars && chars > 0 ? chars : Math.max(1, Math.round(rw / (rh * 0.62)));
     const slot = rw / n;
-    for (let i = 0; i < n; i++) ctx.fillText(state.maskChar, rx + slot * (i + 0.5), ry + rh / 2);
+    const pool = state.maskChars && state.maskChars.length ? state.maskChars : ["*"];
+    // 여러 문자를 선택하면 각 자리에 무작위로 섞어 실제 마스킹 문서처럼 표기
+    for (let i = 0; i < n; i++) {
+      const ch = pool.length === 1 ? pool[0] : pool[(Math.random() * pool.length) | 0];
+      ctx.fillText(ch, rx + slot * (i + 0.5), ry + rh / 2);
+    }
   }
 
   // ================= 결과 & 미리보기 =================
