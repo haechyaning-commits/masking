@@ -26,9 +26,12 @@
   ];
   const AUTO_IDS = AUTO_CATS.map((c) => c.id);
 
+  // 수동 마스킹 기본 방식은 화면의 기본 선택 라디오("문자")와 반드시 일치해야 한다.
+  // 하드코딩하면 마크업 기본값이 바뀔 때 또 어긋날 수 있어 DOM에서 직접 읽는다.
+  const initialMstyle = (document.querySelector('input[name="mstyle"]:checked') || {}).value || "symbol";
   const state = {
     fileName: "", originalBytes: null, pages: [], dets: [],
-    maskChar: "*", maskLevel: "partial", manualMode: false, manualStyle: "box",
+    maskChar: "*", maskLevel: "partial", manualMode: false, manualStyle: initialMstyle,
   };
   let detIdSeq = 0, lastUrl = null, lastBytes = null;
 
@@ -260,10 +263,14 @@
     for (const item of rec.items) {
       const info = itemCharXs(item);
       const top = info.baseline + info.fontHeight * 0.8, bot = info.baseline - info.fontHeight * 0.2;
-      if (bot > by1 || top < by0) continue; // 세로로 안 겹치면 제외
+      // 세로: 어중간하게 스치기만 한 옆줄까지 끌려오지 않도록, 줄 높이의 40% 이상
+      // 확실히 겹칠 때만 그 줄을 인정한다.
+      const lineH = top - bot, vOverlap = Math.min(top, by1) - Math.max(bot, by0);
+      if (vOverlap < lineH * 0.4) continue;
       for (let i = 0; i < item.str.length; i++) {
-        const cx = info.x0 + (info.xs[i] + info.xs[i + 1]) / 2; // 글자 가로 중심
-        if (cx >= bx0 && cx <= bx1) hits.push(item._gStart + i);
+        // 가로: 글자 일부라도 드래그 영역에 걸치면 포함 — 살짝만 스쳐도 그 글자를 놓치지 않도록.
+        const cxs = info.x0 + info.xs[i], cxe = info.x0 + info.xs[i + 1];
+        if (cxe >= bx0 && cxs <= bx1) hits.push(item._gStart + i);
       }
     }
     if (!hits.length) return null;
@@ -274,8 +281,22 @@
       else { ranges.push([s, prev + 1]); s = hits[k]; prev = hits[k]; }
     }
     ranges.push([s, prev + 1]);
+    const txt = rec.text;
+    // 드래그가 단어 중간까지만 걸쳐도 그 단어 전체가 잡히도록 경계까지 확장한다
+    // (공백·구두점 등 비단어 문자에서는 확장하지 않음 → 옆 단어까지 번지지 않음).
+    for (const r of ranges) {
+      while (r[0] > 0 && isWordChar(txt[r[0] - 1]) && isWordChar(txt[r[0]])) r[0]--;
+      while (r[1] < txt.length && isWordChar(txt[r[1] - 1]) && isWordChar(txt[r[1]])) r[1]++;
+    }
+    // 확장 후 겹치는 범위 병합
+    ranges.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const r of ranges) {
+      if (merged.length && r[0] <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
+      else merged.push(r);
+    }
     const rects = [], tokens = [];
-    for (const [a, b] of ranges) {
+    for (const [a, b] of merged) {
       const rr = rangeRects(a, b, rec.charMap);
       if (rr.length) { rects.push(...rr); tokens.push(rec.text.slice(a, b)); }
     }
