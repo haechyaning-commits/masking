@@ -268,9 +268,11 @@
       const lineH = top - bot, vOverlap = Math.min(top, by1) - Math.max(bot, by0);
       if (vOverlap < lineH * 0.4) continue;
       for (let i = 0; i < item.str.length; i++) {
-        // 가로: 글자 일부라도 드래그 영역에 걸치면 포함 — 살짝만 스쳐도 그 글자를 놓치지 않도록.
-        const cxs = info.x0 + info.xs[i], cxe = info.x0 + info.xs[i + 1];
-        if (cxe >= bx0 && cxs <= bx1) hits.push(item._gStart + i);
+        // 가로: 글자의 "중심점"이 드래그 영역 안에 있을 때만 포함한다.
+        // 가장자리가 살짝만 스쳐도 포함시키면(부분 겹침) 표의 옆 칸(다른 열)
+        // 글자까지 끌려와 버려서, 중심점 기준으로 되돌린다.
+        const cx = info.x0 + (info.xs[i] + info.xs[i + 1]) / 2;
+        if (cx >= bx0 && cx <= bx1) hits.push(item._gStart + i);
       }
     }
     if (!hits.length) return null;
