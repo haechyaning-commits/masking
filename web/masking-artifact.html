@@ -830,7 +830,7 @@ body {
     pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText], { type: "application/javascript" }));
   } catch (e) { console.warn("worker 설정 실패", e); }
 
-  const VIEW_SCALE = 1.3, RASTER_SCALE = 2.0;
+  const VIEW_SCALE = 1.3, RASTER_SCALE = 3.0;
   const SYMBOL_FONT = '"WenQuanYi Zen Hei", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
   // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
   const AUTO_CATS = [
@@ -1310,23 +1310,45 @@ body {
       canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
       const ctx = canvas.getContext("2d");
       await page.render({ canvasContext: ctx, viewport }).promise;
+      // 이 페이지의 모든 마스킹 영역을 먼저 모은다 — 여백을 얼마나 줄 수 있는지는
+      // 옆/위아래에 있는 "다른" 마스킹까지의 실제 간격을 봐야 정할 수 있다.
+      const pageRects = [];
       for (const det of included) {
         if (det.pageIndex !== pageIndex) continue;
         // 부분 마스킹 또는 문자 스타일 → 마스킹 문자로, 아니면 검은박스
         const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
         for (const r of activeRects(det)) {
           const rx = r.x * RASTER_SCALE, ry = (meta.heightPts - (r.y + r.h)) * RASTER_SCALE, rw = r.w * RASTER_SCALE, rh = r.h * RASTER_SCALE;
-          // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠).
-          // 가로 여백은 높이 기준값에 폭 기준 상한을 둔다 — 이름 가운데 한 글자처럼
-          // 폭이 좁은 마스킹에서 옆 글자(예: 김*희의 김·희)까지 침범하지 않도록.
-          // 세로 여백은 최소한만 둔다 — itemSubRect가 이미 위아래 여유를 두고 계산해서
-          // 크게 더할 필요가 없고, 표처럼 행 간격이 좁은 문서에서 여백이 크면 바로
-          // 위/아래 행까지 침범해 겹쳐 보인다.
-          const padY = rh * 0.02, padX = Math.min(rh * 0.16, rw * 0.12);
-          const fx = rx - padX, fy = ry - padY, fw = rw + padX * 2, fh2 = rh + padY * 2;
-          if (useChar) drawChars(ctx, fx, fy, fw, fh2, r.chars);
-          else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
+          pageRects.push({ rx, ry, rw, rh, useChar, chars: r.chars });
         }
+      }
+      for (const cur of pageRects) {
+        // 같은 줄(세로로 겹치는 다른 마스킹)까지의 가로 간격, 같은 열(가로로 겹치는
+        // 다른 마스킹)까지의 세로 간격 중 가장 좁은 것을 찾는다.
+        let hGap = Infinity, vGap = Infinity;
+        for (const other of pageRects) {
+          if (other === cur) continue;
+          const vOverlap = Math.min(cur.ry + cur.rh, other.ry + other.rh) - Math.max(cur.ry, other.ry);
+          if (vOverlap > 0) {
+            const gap = other.rx >= cur.rx + cur.rw ? other.rx - (cur.rx + cur.rw)
+              : (cur.rx >= other.rx + other.rw ? cur.rx - (other.rx + other.rw) : 0);
+            if (gap < hGap) hGap = gap;
+          }
+          const hOverlap = Math.min(cur.rx + cur.rw, other.rx + other.rw) - Math.max(cur.rx, other.rx);
+          if (hOverlap > 0) {
+            const gap = other.ry >= cur.ry + cur.rh ? other.ry - (cur.ry + cur.rh)
+              : (cur.ry >= other.ry + other.rh ? cur.ry - (other.ry + other.rh) : 0);
+            if (gap < vGap) vGap = gap;
+          }
+        }
+        // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠).
+        // 다만 옆/위아래에 다른 마스킹이 가까이 있으면 그 간격의 40%를 넘지 않도록
+        // 상한을 둬서, 전화번호·이메일처럼 마스킹 대상끼리 붙어 있어도 서로 겹치지 않게 한다.
+        const padY = Math.min(cur.rh * 0.02, vGap * 0.4);
+        const padX = Math.min(cur.rh * 0.16, cur.rw * 0.12, hGap * 0.4);
+        const fx = cur.rx - padX, fy = cur.ry - padY, fw = cur.rw + padX * 2, fh2 = cur.rh + padY * 2;
+        if (cur.useChar) drawChars(ctx, fx, fy, fw, fh2, cur.chars);
+        else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
       }
       const png = await new Promise((res, rej) => canvas.toBlob((b) => b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("canvas")), "image/png"));
       const img = await out.embedPng(png);
