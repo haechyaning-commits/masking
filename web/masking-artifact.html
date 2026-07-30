@@ -894,6 +894,16 @@ body {
     history.length = 0; updateUndo(); el.undoBtn.hidden = true;
     el.autoMeta.textContent = el.entityMeta.textContent = el.manualMeta.textContent = el.totalMeta.textContent = el.uploadMeta.textContent = "";
     if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
+    // 새 파일이면 이름·기관 가리기 입력도 초기화 → 새 문서에 맞춰 새로 작성.
+    el.wordList.value = "";
+    if (el.suffixRule) el.suffixRule.checked = true;
+    // 직접 지정(수동) 모드도 끈 상태로 되돌린다.
+    state.manualMode = false;
+    if (el.sameWord) el.sameWord.checked = false;
+    if (el.manualToggle) {
+      el.manualToggle.setAttribute("aria-pressed", "false");
+      el.manualToggle.textContent = "✏️ 직접 지정 모드 켜기";
+    }
   }
 
   // ================= PDF 처리 =================
@@ -940,7 +950,9 @@ body {
     let text = ""; const charMap = [], items = [];
     for (const item of content.items) {
       if (typeof item.str !== "string") continue;
-      if (item.str.length) items.push(item);
+      // 이 조각의 첫 글자가 페이지 텍스트에서 갖는 전역 인덱스(=현재 charMap 길이).
+      // 클릭/드래그 위치를 페이지 텍스트 인덱스로 빠르고 정확히 되돌리는 데 쓴다.
+      if (item.str.length) { item._gStart = charMap.length; items.push(item); }
       for (let i = 0; i < item.str.length; i++) { text += item.str[i]; charMap.push({ item, offset: i }); }
       if (item.hasEOL) { text += "\n"; charMap.push(null); }
     }
@@ -953,37 +965,66 @@ body {
     const t = item.transform, fh = Math.hypot(t[2], t[3]) || 10;
     return { x0: t[4], top: t[5] + fh * 0.9, bottom: t[5] - fh * 0.28, w: item.width || fh * (item.str.length || 1), fh };
   }
-  function findTokenAtPoint(rec, px, py) {
-    let hit = null;
+  const isWordChar = (ch) => ch && !TOKEN_DELIM.test(ch);
+  // 클릭 지점을 조각(item)에 맞춘다. 정확히 얹히지 않아도 가장 가까운 글자 조각을
+  // (약 1.2줄 높이 이내) 채택 → 드래그/클릭 위치가 조금 어긋나도 단어를 잡는다.
+  function itemAtPoint(rec, px, py) {
+    let best = null, bestDist = Infinity;
     for (const item of rec.items) {
       const b = itemBBox(item);
-      if (px >= b.x0 - 1 && px <= b.x0 + b.w + 1 && py >= b.bottom && py <= b.top) { hit = item; break; }
+      const inX = px >= b.x0 - 1 && px <= b.x0 + b.w + 1;
+      const inY = py >= b.bottom && py <= b.top;
+      if (inX && inY) return { item, exact: true };
+      const dx = px < b.x0 ? b.x0 - px : (px > b.x0 + b.w ? px - (b.x0 + b.w) : 0);
+      const dy = py < b.bottom ? b.bottom - py : (py > b.top ? py - b.top : 0);
+      const d = Math.hypot(dx, dy);
+      if (d < bestDist) { bestDist = d; best = item; }
     }
-    if (!hit) return null;
-    const b = itemBBox(hit), s0 = hit.str;
+    if (best && bestDist <= (itemBBox(best).fh * 1.2)) return { item: best, exact: false };
+    return null;
+  }
+  // 클릭 지점의 단어를 페이지 텍스트 인덱스 [start,end) 로 반환.
+  // 조각 경계를 넘어(예: '홍','길','동'이 따로 저장된 경우) 단어 전체를 이어 붙인다.
+  function findTokenAtPoint(rec, px, py) {
+    const found = itemAtPoint(rec, px, py);
+    if (!found) return null;
+    const hit = found.item, b = itemBBox(hit), s0 = hit.str;
     let off = Math.floor(Math.max(0, Math.min(1, (px - b.x0) / b.w)) * s0.length);
     off = Math.max(0, Math.min(s0.length - 1, off));
-    const isW = (ch) => ch && !TOKEN_DELIM.test(ch);
-    if (!isW(s0[off])) { if (isW(s0[off + 1])) off++; else if (off > 0 && isW(s0[off - 1])) off--; else return null; }
-    let s = off, e = off;
-    while (s > 0 && isW(s0[s - 1])) s--;
-    while (e < s0.length - 1 && isW(s0[e + 1])) e++;
-    return { item: hit, tStart: s, tEnd: e, token: s0.slice(s, e + 1) };
+    let g = hit._gStart + off;
+    const txt = rec.text;
+    if (!isWordChar(txt[g])) {
+      if (isWordChar(txt[g + 1])) g++;
+      else if (g > 0 && isWordChar(txt[g - 1])) g--;
+      else return null;
+    }
+    let s = g, e = g;
+    while (s > 0 && isWordChar(txt[s - 1])) s--;
+    while (e < txt.length - 1 && isWordChar(txt[e + 1])) e++;
+    return { start: s, end: e + 1, token: txt.slice(s, e + 1) };
+  }
+  // 같은 단어를 문서 전체에서 찾아 마스킹(중복 구간은 건너뜀).
+  function maskWordEverywhere(word) {
+    if (!word) return;
+    for (const r of state.pages) {
+      let from = 0, idx;
+      while ((idx = r.text.indexOf(word, from)) !== -1) {
+        from = idx + word.length;
+        const key = idx + ":" + (idx + word.length);
+        if (state.dets.some((d) => d.source === "manual" && d.pageIndex === r.pageIndex && d.rangeKey === key)) continue;
+        const rects = rangeRects(idx, idx + word.length, r.charMap);
+        if (rects.length) addDet({ pageIndex: r.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: word, rangeKey: key });
+      }
+    }
   }
   function maskToken(rec, tok) {
     snapshot();
     if (el.sameWord && el.sameWord.checked && tok.token.length >= 1) {
-      for (const r of state.pages) {
-        let from = 0, idx;
-        while ((idx = r.text.indexOf(tok.token, from)) !== -1) {
-          from = idx + tok.token.length;
-          const rects = rangeRects(idx, idx + tok.token.length, r.charMap);
-          if (rects.length) addDet({ pageIndex: r.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: tok.token });
-        }
-      }
+      maskWordEverywhere(tok.token);
     } else {
-      const rect = itemSubRect(tok.item, tok.tStart, tok.tEnd);
-      if (rect) addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: [rect], partialRects: [rect], value: tok.token });
+      const key = tok.start + ":" + tok.end;
+      const rects = rangeRects(tok.start, tok.end, rec.charMap);
+      if (rects.length) addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: tok.token, rangeKey: key });
     }
     renderReport();
   }
@@ -1012,6 +1053,46 @@ body {
     const matchWidth = _mc.measureText(str.slice(startOffset, endOffset + 1)).width * scale;
     // 검토 박스는 글자에 딱 맞게(여백 없음). 출력 커버 여백은 buildRaster에서 추가.
     return { x: x0 + preWidth, y: yBaseline - fontHeight * 0.2, w: matchWidth, h: fontHeight * 1.06, chars: endOffset - startOffset + 1 };
+  }
+  // 한 조각(item)의 글자별 왼쪽 x오프셋 누적 목록(실제 폰트로 측정) — 드래그 스냅용
+  function itemCharXs(item) {
+    const t = item.transform;
+    const fontHeight = Math.hypot(t[2], t[3]) || Math.hypot(t[0], t[1]) || 10;
+    const str = item.str, totalWidth = item.width || fontHeight * (str.length || 1);
+    _mc.font = '32px ' + (item._font ? '"' + item._font + '"' : "sans-serif");
+    const measuredFull = _mc.measureText(str).width || 1, scale = totalWidth / measuredFull;
+    const xs = [];
+    for (let i = 0; i <= str.length; i++) xs.push(_mc.measureText(str.slice(0, i)).width * scale);
+    return { xs, x0: t[4], baseline: t[5], fontHeight };
+  }
+  // 드래그한 사각형(PDF 좌표: x=왼쪽, y=아래, w, h) 안에 든 글자를 찾아
+  // 정확한 글자 위치로 '스냅'된 사각형들을 돌려준다. 텍스트가 없으면 null.
+  function snapDragToText(rec, box) {
+    const bx0 = box.x, bx1 = box.x + box.w, by0 = box.y, by1 = box.y + box.h;
+    const hits = [];
+    for (const item of rec.items) {
+      const info = itemCharXs(item);
+      const top = info.baseline + info.fontHeight * 0.8, bot = info.baseline - info.fontHeight * 0.2;
+      if (bot > by1 || top < by0) continue; // 세로로 안 겹치면 제외
+      for (let i = 0; i < item.str.length; i++) {
+        const cx = info.x0 + (info.xs[i] + info.xs[i + 1]) / 2; // 글자 가로 중심
+        if (cx >= bx0 && cx <= bx1) hits.push(item._gStart + i);
+      }
+    }
+    if (!hits.length) return null;
+    hits.sort((a, b) => a - b);
+    const ranges = []; let s = hits[0], prev = hits[0];
+    for (let k = 1; k < hits.length; k++) {
+      if (hits[k] === prev + 1) prev = hits[k];
+      else { ranges.push([s, prev + 1]); s = hits[k]; prev = hits[k]; }
+    }
+    ranges.push([s, prev + 1]);
+    const rects = [], tokens = [];
+    for (const [a, b] of ranges) {
+      const rr = rangeRects(a, b, rec.charMap);
+      if (rr.length) { rects.push(...rr); tokens.push(rec.text.slice(a, b)); }
+    }
+    return rects.length ? { rects, text: tokens.join(" ") } : null;
   }
 
   // ===== 부분 마스킹 표준 규칙: 가릴 하위 범위 [a,b) 반환 =====
@@ -1135,7 +1216,7 @@ body {
   el.manualToggle.addEventListener("click", () => {
     state.manualMode = !state.manualMode;
     el.manualToggle.setAttribute("aria-pressed", String(state.manualMode));
-    el.manualToggle.textContent = state.manualMode ? "✏️ 수동 마스킹 모드 끄기" : "✏️ 수동 마스킹 모드 켜기";
+    el.manualToggle.textContent = state.manualMode ? "✏️ 직접 지정 모드 끄기" : "✏️ 직접 지정 모드 켜기";
     state.pages.forEach((p) => p.pw.classList.toggle("manual-on", state.manualMode));
   });
   document.querySelectorAll('input[name="mstyle"]').forEach((r) => r.addEventListener("change", () => { if (r.checked) state.manualStyle = r.value; }));
@@ -1167,9 +1248,17 @@ body {
         }
         if (w < 6 || h < 6) return;
         snapshot();
-        const rect = { x: left / VIEW_SCALE, y: rec.meta.heightPts - (top + h) / VIEW_SCALE, w: w / VIEW_SCALE, h: h / VIEW_SCALE };
-        addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
-          fullRects: [rect], partialRects: [rect], value: state.manualStyle === "symbol" ? "수동 (문자)" : "수동 (검은박스)" });
+        const box = { x: left / VIEW_SCALE, y: rec.meta.heightPts - (top + h) / VIEW_SCALE, w: w / VIEW_SCALE, h: h / VIEW_SCALE };
+        // 드래그가 글자 위를 지나면 그 글자에 딱 맞춰 마스킹(위치 부정확 보정).
+        // 표·도장 등 텍스트가 없는 영역이면 드래그한 사각형 그대로 사용.
+        const snapped = snapDragToText(rec, box);
+        if (snapped) {
+          addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
+            fullRects: snapped.rects, partialRects: snapped.rects, value: snapped.text || "수동 (드래그)" });
+        } else {
+          addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
+            fullRects: [box], partialRects: [box], value: state.manualStyle === "symbol" ? "수동 (문자)" : "수동 (검은박스)" });
+        }
         renderReport();
       };
       document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
