@@ -1326,7 +1326,10 @@ body {
           // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠).
           // 가로 여백은 높이 기준값에 폭 기준 상한을 둔다 — 이름 가운데 한 글자처럼
           // 폭이 좁은 마스킹에서 옆 글자(예: 김*희의 김·희)까지 침범하지 않도록.
-          const padY = rh * 0.06, padX = Math.min(rh * 0.16, rw * 0.12);
+          // 세로 여백은 최소한만 둔다 — itemSubRect가 이미 위아래 여유를 두고 계산해서
+          // 크게 더할 필요가 없고, 표처럼 행 간격이 좁은 문서에서 여백이 크면 바로
+          // 위/아래 행까지 침범해 겹쳐 보인다.
+          const padY = rh * 0.02, padX = Math.min(rh * 0.16, rw * 0.12);
           const fx = rx - padX, fy = ry - padY, fw = rw + padX * 2, fh2 = rh + padY * 2;
           if (useChar) drawChars(ctx, fx, fy, fw, fh2, r.chars);
           else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
