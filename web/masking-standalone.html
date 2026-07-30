@@ -1023,7 +1023,7 @@ body {
         const key = idx + ":" + (idx + word.length);
         if (state.dets.some((d) => d.source === "manual" && d.pageIndex === r.pageIndex && d.rangeKey === key)) continue;
         const rects = rangeRects(idx, idx + word.length, r.charMap);
-        if (rects.length) addDet({ pageIndex: r.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: word, rangeKey: key });
+        if (rects.length) addDet({ pageIndex: r.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: word, rangeKey: key, wordMatch: true });
       }
     }
   }
@@ -1034,7 +1034,7 @@ body {
     } else {
       const key = tok.start + ":" + tok.end;
       const rects = rangeRects(tok.start, tok.end, rec.charMap);
-      if (rects.length) addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: tok.token, rangeKey: key });
+      if (rects.length) addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle, fullRects: rects, partialRects: rects, value: tok.token, rangeKey: key, wordMatch: true });
     }
     renderReport();
   }
@@ -1168,7 +1168,7 @@ body {
       box.style.height = r.h * VIEW_SCALE + "px";
       box.dataset.det = det.id;
       if (det.value) { const tip = document.createElement("span"); tip.className = "box__tip"; tip.textContent = det.value; box.appendChild(tip); }
-      box.addEventListener("click", (ev) => { ev.stopPropagation(); if (det.source === "manual") removeDet(det.id); else toggleDet(det.id); });
+      box.addEventListener("click", (ev) => { ev.stopPropagation(); if (det.source === "manual") removeManualDet(det); else toggleDet(det.id); });
       rec.ov.appendChild(box);
     }
   }
@@ -1176,6 +1176,21 @@ body {
   function refreshBox(det) { boxesOf(det.id).forEach((b) => { b.classList.toggle("on", det.included); b.classList.toggle("off", !det.included); }); }
   function toggleDet(idv) { const d = state.dets.find((x) => x.id === idv); if (!d) return; snapshot(); d.included = !d.included; refreshBox(d); renderReport(); }
   function removeDet(idv) { snapshot(); boxesOf(idv).forEach((b) => b.remove()); state.dets = state.dets.filter((x) => x.id !== idv); renderReport(); }
+  // 수동 마스킹 박스 삭제: "같은 단어 함께 가리기"가 켜져 있고, 이 박스가 실제
+  // 텍스트 단어를 잡은 것이면(비텍스트 드래그 사각형 제외) 같은 단어의 모든
+  // 항목을 한 번에 지운다 — 추가할 때와 대칭이 되도록.
+  function removeManualDet(det) {
+    if (el.sameWord && el.sameWord.checked && det.wordMatch && det.value) {
+      snapshot();
+      const toRemove = state.dets.filter((d) => d.source === "manual" && d.wordMatch && d.value === det.value);
+      toRemove.forEach((d) => boxesOf(d.id).forEach((b) => b.remove()));
+      const ids = new Set(toRemove.map((d) => d.id));
+      state.dets = state.dets.filter((d) => !ids.has(d.id));
+      renderReport();
+    } else {
+      removeDet(det.id);
+    }
+  }
   function removeDetsBySource(src) { state.dets.filter((d) => d.source === src).forEach((d) => boxesOf(d.id).forEach((b) => b.remove())); state.dets = state.dets.filter((d) => d.source !== src); }
   function redrawOverlays() { document.querySelectorAll(".ov").forEach((o) => (o.innerHTML = "")); state.dets.forEach(drawBoxes); }
 
@@ -1278,7 +1293,7 @@ body {
             snapped.tokens.forEach(maskWordEverywhere);
           } else {
             addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
-              fullRects: snapped.rects, partialRects: snapped.rects, value: snapped.text || "수동 (드래그)" });
+              fullRects: snapped.rects, partialRects: snapped.rects, value: snapped.text || "수동 (드래그)", wordMatch: !!snapped.text });
           }
         } else {
           addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
