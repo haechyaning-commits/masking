@@ -34,12 +34,21 @@ const scripts = [
 // 1) 아티팩트용 (body-only; 하네스가 doctype/head/body로 감쌈)
 fs.writeFileSync(path.join(DIR, "masking-artifact.html"), scripts);
 
+// 브라우저가 코드 내용과 무관하게 강제로 네트워크 전송을 차단하도록 하는 CSP.
+// "코드에 fetch가 없다"를 사용자가 매번 읽어서 확인할 필요 없이, 브라우저가
+// 기술적으로 보장해준다(connect-src 'none' → 어떤 fetch/XHR/WebSocket도 차단).
+const CSP =
+  "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; " +
+  "img-src data: blob:; font-src data:; worker-src blob:; connect-src 'none'; " +
+  "object-src 'none'; base-uri 'none'; form-action 'none';";
+
 // 2) 독립 실행용 (더블클릭)
 const standalone = `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Content-Security-Policy" content="${CSP}" />
 </head>
 <body>
 ${scripts}
@@ -47,5 +56,12 @@ ${scripts}
 </html>`;
 fs.writeFileSync(path.join(DIR, "masking-standalone.html"), standalone);
 
+// 3) 웹 호스팅용 (GitHub Pages 등 — URL로 바로 접속해 쓰는 버전). 독립 실행용과
+// 동일한 내용 + 동일한 CSP를 docs/index.html 로도 내보내 그대로 정적 호스팅한다.
+const DOCS = path.join(ROOT, "docs");
+if (!fs.existsSync(DOCS)) fs.mkdirSync(DOCS);
+fs.writeFileSync(path.join(DOCS, "index.html"), standalone);
+
 console.log("artifact:", fs.statSync(path.join(DIR, "masking-artifact.html")).size, "bytes");
 console.log("standalone:", fs.statSync(path.join(DIR, "masking-standalone.html")).size, "bytes");
+console.log("docs/index.html:", fs.statSync(path.join(DOCS, "index.html")).size, "bytes");
