@@ -1088,32 +1088,21 @@ body {
     }
     if (!hits.length) return null;
     hits.sort((a, b) => a - b);
+    // 드래그가 실제로 닿은 글자만 범위로 잡는다(단어 경계로 확장하지 않음).
+    // 공백 문자 없이 좌표만 벌려 배치된 문서가 많아, 경계까지 확장하면
+    // 줄 전체가 딸려오는 과다 확장이 생겨서 이 확장은 넣지 않는다.
     const ranges = []; let s = hits[0], prev = hits[0];
     for (let k = 1; k < hits.length; k++) {
       if (hits[k] === prev + 1) prev = hits[k];
       else { ranges.push([s, prev + 1]); s = hits[k]; prev = hits[k]; }
     }
     ranges.push([s, prev + 1]);
-    const txt = rec.text;
-    // 드래그가 단어 중간까지만 걸쳐도 그 단어 전체가 잡히도록 경계까지 확장한다
-    // (공백·구두점 등 비단어 문자에서는 확장하지 않음 → 옆 단어까지 번지지 않음).
-    for (const r of ranges) {
-      while (r[0] > 0 && isWordChar(txt[r[0] - 1]) && isWordChar(txt[r[0]])) r[0]--;
-      while (r[1] < txt.length && isWordChar(txt[r[1] - 1]) && isWordChar(txt[r[1]])) r[1]++;
-    }
-    // 확장 후 겹치는 범위 병합
-    ranges.sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const r of ranges) {
-      if (merged.length && r[0] <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
-      else merged.push(r);
-    }
     const rects = [], tokens = [];
-    for (const [a, b] of merged) {
+    for (const [a, b] of ranges) {
       const rr = rangeRects(a, b, rec.charMap);
       if (rr.length) { rects.push(...rr); tokens.push(rec.text.slice(a, b)); }
     }
-    return rects.length ? { rects, text: tokens.join(" ") } : null;
+    return rects.length ? { rects, text: tokens.join(" "), tokens } : null;
   }
 
   // ===== 부분 마스킹 표준 규칙: 가릴 하위 범위 [a,b) 반환 =====
@@ -1274,8 +1263,14 @@ body {
         // 표·도장 등 텍스트가 없는 영역이면 드래그한 사각형 그대로 사용.
         const snapped = snapDragToText(rec, box);
         if (snapped) {
-          addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
-            fullRects: snapped.rects, partialRects: snapped.rects, value: snapped.text || "수동 (드래그)" });
+          // 클릭과 동일하게, "같은 단어 함께 가리기"가 켜져 있으면 드래그로 잡은
+          // 단어(들)도 문서 전체에서 찾아 함께 마스킹한다.
+          if (el.sameWord && el.sameWord.checked && snapped.tokens.length) {
+            snapped.tokens.forEach(maskWordEverywhere);
+          } else {
+            addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
+              fullRects: snapped.rects, partialRects: snapped.rects, value: snapped.text || "수동 (드래그)" });
+          }
         } else {
           addDet({ pageIndex: rec.pageIndex, category: "manual", source: "manual", style: state.manualStyle,
             fullRects: [box], partialRects: [box], value: state.manualStyle === "symbol" ? "수동 (문자)" : "수동 (검은박스)" });
@@ -1319,8 +1314,11 @@ body {
         const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
         for (const r of activeRects(det)) {
           const rx = r.x * RASTER_SCALE, ry = (meta.heightPts - (r.y + r.h)) * RASTER_SCALE, rw = r.w * RASTER_SCALE, rh = r.h * RASTER_SCALE;
-          // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠)
-          const pad = rh * 0.16, fx = rx - pad, fy = ry - rh * 0.06, fw = rw + pad * 2, fh2 = rh + rh * 0.12;
+          // 출력 시에만 커버 여백을 더해 글자를 확실히 가림(검토 박스는 그대로 둠).
+          // 가로 여백은 높이 기준값에 폭 기준 상한을 둔다 — 이름 가운데 한 글자처럼
+          // 폭이 좁은 마스킹에서 옆 글자(예: 김*희의 김·희)까지 침범하지 않도록.
+          const padY = rh * 0.06, padX = Math.min(rh * 0.16, rw * 0.12);
+          const fx = rx - padX, fy = ry - padY, fw = rw + padX * 2, fh2 = rh + padY * 2;
           if (useChar) drawChars(ctx, fx, fy, fw, fh2, r.chars);
           else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
         }
@@ -1336,11 +1334,17 @@ body {
   function drawChars(ctx, rx, ry, rw, rh, chars) {
     ctx.fillStyle = "#fff"; ctx.fillRect(rx, ry, rw, rh);
     ctx.fillStyle = "#000";
-    const fs = Math.floor(rh * 0.8);
-    ctx.font = fs + "px " + SYMBOL_FONT; ctx.textBaseline = "middle"; ctx.textAlign = "center";
     // 가려진 글자 수만큼 정확히 채움(없으면 폭으로 근사 — 드래그 영역 등)
     const n = chars && chars > 0 ? chars : Math.max(1, Math.round(rw / (rh * 0.62)));
     const slot = rw / n;
+    // 칸(slot) 폭보다 글자가 넓으면 옆 글자와 겹쳐 하나의 덩어리처럼 보이므로,
+    // 실제 렌더링 폭을 측정해 칸에 맞을 때까지 폰트 크기를 줄인다.
+    let fs = Math.floor(rh * 0.8);
+    ctx.font = fs + "px " + SYMBOL_FONT;
+    const maxCharW = slot * 0.78; // 글자 사이 최소 여백 확보
+    const measured = ctx.measureText(state.maskChar).width || 1;
+    if (measured > maxCharW) fs = Math.max(6, Math.floor(fs * maxCharW / measured));
+    ctx.font = fs + "px " + SYMBOL_FONT; ctx.textBaseline = "middle"; ctx.textAlign = "center";
     for (let i = 0; i < n; i++) ctx.fillText(state.maskChar, rx + slot * (i + 0.5), ry + rh / 2);
   }
 
