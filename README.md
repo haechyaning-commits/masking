@@ -80,7 +80,9 @@ web/                     단일 파일(아티팩트) 앱 — 현재 버전
   body.html · masking.css · app-artifact.js   소스
   build.js                 위 소스 + vendor/js 를 단일 파일로 조립
 docs/index.html          GitHub Pages 호스팅용 (masking-standalone.html과 동일 내용)
-js/detectors.js          개인정보·이름/기관 탐지 로직 (공용)
+js/detectors.js          개인정보·이름/기관 탐지 로직 (공용, 화면과 무관한 순수 로직)
+js/mask-engine.js        좌표계산·드래그스냅·부분마스킹규칙·기호배정·래스터 생성 (공용, 화면과 무관한 순수 로직 —
+                          화면을 다른 프레임워크로 바꿔도 이 두 파일은 그대로 재사용 가능)
 vendor/                  pdf.js · pdf-lib (오프라인용 포함)
 samples/                 시험용 샘플 PDF (허구 데이터)
 index.html · js/app.js · css/styles.css   초기 프로토타입(참고)

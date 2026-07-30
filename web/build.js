@@ -13,6 +13,7 @@ const pdfjs = read(path.join(VENDOR, "pdf.min.js"));
 const pdflib = read(path.join(VENDOR, "pdf-lib.min.js"));
 const worker = read(path.join(VENDOR, "pdf.worker.min.js"));
 const detectors = read(path.join(JS, "detectors.js"));
+const engine = read(path.join(JS, "mask-engine.js"));
 const app = read(path.join(DIR, "app-artifact.js"));
 
 // 스크립트 내부 </script> 충돌 방어 + U+FFFD(치환문자) 이스케이프.
@@ -28,6 +29,7 @@ const scripts = [
   `<script>${safe(pdflib)}</script>`,
   `<script id="pdfWorkerSrc" type="text/plain">${safe(worker)}</script>`,
   `<script>${safe(detectors)}</script>`,
+  `<script>${safe(engine)}</script>`,
   `<script>${safe(app)}</script>`,
 ].join("\n");
 
