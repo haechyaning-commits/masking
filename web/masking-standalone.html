@@ -452,7 +452,7 @@ body {
         <textarea id="wordList" class="wordlist" rows="4" placeholder="예시)&#10;홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
         <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
         <div class="symrow">
-          <span class="muted">마스킹 문자</span>
+          <span class="muted">마스킹 문자 <small>(번호류 전용 — 이름·직접지정은 사람마다 다른 기호가 자동 배정됩니다)</small></span>
           <div class="syms" id="symPicker">
             <button type="button" class="sym on" data-sym="*">*</button>
             <button type="button" class="sym" data-sym="○">○</button>
@@ -839,6 +839,10 @@ body {
 
   const VIEW_SCALE = 1.3, RASTER_SCALE = 3.0;
   const SYMBOL_FONT = '"WenQuanYi Zen Hei", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+  // 이름·직접지정(문자 방식)에 쓸 기호 팔레트 — 같은 사람(단어)은 항상 같은 기호,
+  // 다른 사람은 다른 기호로 순환 배정해 표에서 서로 다른 사람임을 구분할 수 있게 한다.
+  // (번호류는 이 팔레트를 쓰지 않고 항상 사용자가 고른 state.maskChar 하나만 씀)
+  const ENTITY_SYMBOL_PALETTE = ["○", "●", "△", "▲", "□", "■", "◇", "◆", "☆", "★"];
   // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
   const AUTO_CATS = [
     { id: "rrn", label: "주민등록번호" }, { id: "phone", label: "전화번호" },
@@ -852,7 +856,16 @@ body {
   const state = {
     fileName: "", originalBytes: null, pages: [], dets: [],
     maskChar: "*", maskLevel: "partial", manualMode: false, manualStyle: initialMstyle,
+    entitySymbols: new Map(), // 사람(단어) → 배정된 기호
   };
+  // key(사람/단어)에 배정된 기호를 돌려준다. 처음 보는 key면 팔레트에서 순서대로 새로 배정.
+  function symbolForKey(key) {
+    if (!key) return state.maskChar;
+    if (state.entitySymbols.has(key)) return state.entitySymbols.get(key);
+    const sym = ENTITY_SYMBOL_PALETTE[state.entitySymbols.size % ENTITY_SYMBOL_PALETTE.length];
+    state.entitySymbols.set(key, sym);
+    return sym;
+  }
   let detIdSeq = 0, lastUrl = null, lastBytes = null;
 
   const el = {
@@ -898,7 +911,7 @@ body {
     finally { clearTimeout(watchdog); hideLoader(); }
   }
   function resetState() {
-    state.pages = []; state.dets = []; detIdSeq = 0;
+    state.pages = []; state.dets = []; detIdSeq = 0; state.entitySymbols.clear();
     el.pages.innerHTML = ""; el.cats.innerHTML = ""; el.totalCount.textContent = "0";
     el.result.hidden = true; el.previewModal.hidden = true;
     history.length = 0; updateUndo(); el.undoBtn.hidden = true;
@@ -1140,7 +1153,7 @@ body {
         if (isName) { const len = e.maskEnd - e.maskStart; pa = e.maskStart + 1; pb = len <= 2 ? e.maskEnd : e.maskEnd - 1; }
         const masked = rec.text.slice(e.maskStart, e.maskEnd), kept = rec.text.slice(e.maskEnd, e.end);
         addDet({ pageIndex: rec.pageIndex, category: "name", source: "entity", style: "symbol",
-          fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + (kept ? " +『" + kept + "』유지" : "") });
+          fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + (kept ? " +『" + kept + "』유지" : ""), entityKey: masked });
       }
     }
   }
@@ -1339,9 +1352,14 @@ body {
         if (det.pageIndex !== pageIndex) continue;
         // 부분 마스킹 또는 문자 스타일 → 마스킹 문자로, 아니면 검은박스
         const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
+        // 이름(entity)·직접지정(문자 방식)은 사람(단어)마다 다른 기호를 배정.
+        // 번호류(주민번호·전화·이메일·계좌)는 항상 사용자가 고른 마스킹 문자 하나만 사용.
+        let charForDet = state.maskChar;
+        if (useChar && det.category === "name") charForDet = symbolForKey(det.entityKey || det.value);
+        else if (useChar && det.source === "manual" && det.style === "symbol") charForDet = symbolForKey(det.wordMatch ? det.value : det.id);
         for (const r of activeRects(det)) {
           const rx = r.x * RASTER_SCALE, ry = (meta.heightPts - (r.y + r.h)) * RASTER_SCALE, rw = r.w * RASTER_SCALE, rh = r.h * RASTER_SCALE;
-          pageRects.push({ rx, ry, rw, rh, useChar, chars: r.chars });
+          pageRects.push({ rx, ry, rw, rh, useChar, chars: r.chars, char: charForDet });
         }
       }
       for (const cur of pageRects) {
@@ -1369,7 +1387,7 @@ body {
         const padY = Math.min(cur.rh * 0.02, vGap * 0.4);
         const padX = Math.min(cur.rh * 0.16, cur.rw * 0.12, hGap * 0.4);
         const fx = cur.rx - padX, fy = cur.ry - padY, fw = cur.rw + padX * 2, fh2 = cur.rh + padY * 2;
-        if (cur.useChar) drawChars(ctx, fx, fy, fw, fh2, cur.chars);
+        if (cur.useChar) drawChars(ctx, fx, fy, fw, fh2, cur.chars, cur.char);
         else { ctx.fillStyle = "#000"; ctx.fillRect(fx, fy, fw, fh2); }
       }
       const png = await new Promise((res, rej) => canvas.toBlob((b) => b ? b.arrayBuffer().then((a) => res(new Uint8Array(a)), rej) : rej(new Error("canvas")), "image/png"));
@@ -1380,7 +1398,8 @@ body {
   }
 
   // 흰색으로 덮고 마스킹 문자를 채워 넣는다
-  function drawChars(ctx, rx, ry, rw, rh, chars) {
+  function drawChars(ctx, rx, ry, rw, rh, chars, char) {
+    const ch = char || state.maskChar;
     ctx.fillStyle = "#fff"; ctx.fillRect(rx, ry, rw, rh);
     ctx.fillStyle = "#000";
     // 가려진 글자 수만큼 정확히 채움(없으면 폭으로 근사 — 드래그 영역 등)
@@ -1391,10 +1410,10 @@ body {
     let fs = Math.floor(rh * 0.8);
     ctx.font = fs + "px " + SYMBOL_FONT;
     const maxCharW = slot * 0.78; // 글자 사이 최소 여백 확보
-    const measured = ctx.measureText(state.maskChar).width || 1;
+    const measured = ctx.measureText(ch).width || 1;
     if (measured > maxCharW) fs = Math.max(6, Math.floor(fs * maxCharW / measured));
     ctx.font = fs + "px " + SYMBOL_FONT; ctx.textBaseline = "middle"; ctx.textAlign = "center";
-    for (let i = 0; i < n; i++) ctx.fillText(state.maskChar, rx + slot * (i + 0.5), ry + rh / 2);
+    for (let i = 0; i < n; i++) ctx.fillText(ch, rx + slot * (i + 0.5), ry + rh / 2);
   }
 
   // ================= 결과 & 미리보기 =================
