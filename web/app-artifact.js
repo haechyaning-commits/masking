@@ -1,10 +1,10 @@
 /**
  * app-artifact.js — 단일 파일(아티팩트) 버전
- *  · 번호류(주민/전화/이메일/계좌): 정규식 자동 탐지
+ *  · 번호류(주민/전화/이메일/계좌/카드): 정규식 자동 탐지
  *  · 이름·기관/부서: 단어목록 + 접미어 규칙 (접미어는 유지)
  *  · 수동 마스킹: 페이지 위 드래그로 직접 지정
  *  · 마스킹 수준: 부분(표준) / 전체 선택
- *      - 부분: 주민번호 뒤7·전화 뒤4·이메일 아이디 일부·계좌 앞6 유지·이름 가운데
+ *      - 부분: 주민번호 뒤7·전화 뒤4·이메일 아이디 일부·계좌 앞6 유지·카드 앞6뒤4 유지·이름 가운데
  *      - 전체: 값 전체 (번호=검은박스, 이름=마스킹 문자)
  *  · 출력: 페이지 이미지화(완전 제거) → 원본 글자까지 제거
  */
@@ -28,7 +28,8 @@
   // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
   const AUTO_CATS = [
     { id: "rrn", label: "주민등록번호" }, { id: "phone", label: "전화번호" },
-    { id: "email", label: "이메일" }, { id: "account", label: "계좌번호" },
+    { id: "email", label: "이메일" }, { id: "card", label: "카드번호" },
+    { id: "account", label: "계좌번호" },
   ];
   const AUTO_IDS = AUTO_CATS.map((c) => c.id);
 
@@ -373,7 +374,7 @@
           // 부분 마스킹 또는 문자 스타일 → 마스킹 문자로, 아니면 검은박스
           const useChar = (state.maskLevel === "partial" && det.source !== "manual") || det.style === "symbol";
           // 이름(entity)·직접지정(문자 방식)은 사람(단어)마다 다른 기호를 배정.
-          // 번호류(주민번호·전화·이메일·계좌)는 항상 사용자가 고른 마스킹 문자 하나만 사용.
+          // 번호류(주민번호·전화·이메일·계좌·카드)는 항상 사용자가 고른 마스킹 문자 하나만 사용.
           let charForDet = state.maskChar;
           if (useChar && det.category === "name") charForDet = symbolAssigner.get(det.entityKey || det.value, state.maskChar);
           else if (useChar && det.source === "manual" && det.style === "symbol") charForDet = symbolAssigner.get(det.wordMatch ? det.value : det.id, state.maskChar);

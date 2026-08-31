@@ -163,6 +163,10 @@
     if (category === "rrn" && d.length >= 7) return [start + d[d.length - 7], start + d[d.length - 1] + 1];   // 뒤 7자리
     if (category === "phone" && d.length >= 4) return [start + d[d.length - 4], start + d[d.length - 1] + 1]; // 뒤 4자리
     if (category === "account" && d.length > 6) return [start + d[6], start + d[d.length - 1] + 1];           // 앞 6자리 유지
+    // 카드번호: 앞 6자리(발급사 식별번호)·뒤 4자리를 남기고 중간만 가림(여신전문금융업법
+    // 감독규정·PCI 마스킹 관행 참고, 예: "123456******1234"). 자리수가 10 이하면
+    // 남길 두 구간이 겹치므로 규칙을 적용하지 않고 전체를 가린다(폴백).
+    if (category === "card" && d.length > 10) return [start + d[6], start + d[d.length - 4]];
     if (category === "email") { const at = v.indexOf("@"); if (at > 0) { const keep = at <= 3 ? Math.max(1, at - 1) : 3; return [start + keep, start + at]; } }
     return [start, end]; // 규칙 없으면 전체
   }
