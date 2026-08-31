@@ -1,7 +1,8 @@
 /**
  * app-artifact.js — 단일 파일(아티팩트) 버전
  *  · 번호류(주민/전화/이메일/계좌/카드): 정규식 자동 탐지
- *  · 이름·기관/부서: 단어목록 + 접미어 규칙 (접미어는 유지)
+ *  · 이름·기관/부서: 단어목록 + 접미어 규칙(접미어는 유지) + 성명 라벨 규칙 +
+ *      표 열 구조 인식("성명" 열 헤더 아래 칸 전부) + 성씨 사전(베타)
  *  · 수동 마스킹: 페이지 위 드래그로 직접 지정
  *  · 마스킹 수준: 부분(표준) / 전체 선택
  *      - 부분: 주민번호 뒤7·전화 뒤4·이메일 아이디 일부·계좌 앞6 유지·카드 앞6뒤4 유지·이름 가운데
@@ -49,6 +50,7 @@
     reportCard: id("reportCard"), entityCard: id("entityCard"), manualCard: id("manualCard"), dlCard: id("dlCard"),
     cats: id("cats"), totalCount: id("totalCount"),
     wordList: id("wordList"), suffixRule: id("suffixRule"), nameLabelRule: id("nameLabelRule"), nameDictRule: id("nameDictRule"),
+    tableColumnRule: id("tableColumnRule"),
     symPicker: id("symPicker"), applyEntities: id("applyEntities"),
     manualToggle: id("manualToggle"), sameWord: id("sameWord"), genBtn: id("genBtn"), result: id("result"),
     dlLink: id("dlLink"), dlLink2: id("dlLink2"), previewBtn: id("previewBtn"),
@@ -99,6 +101,7 @@
     if (el.suffixRule) el.suffixRule.checked = true;
     if (el.nameLabelRule) el.nameLabelRule.checked = true;
     if (el.nameDictRule) el.nameDictRule.checked = false; // 베타 기능은 새 문서에서도 기본 꺼짐 유지
+    if (el.tableColumnRule) el.tableColumnRule.checked = true;
     // 직접 지정(수동) 모드도 끈 상태로 되돌린다.
     state.manualMode = false;
     if (el.sameWord) el.sameWord.checked = false;
@@ -179,8 +182,9 @@
     removeDetsBySource("entity");
     const words = currentWords(), useSuffixRule = el.suffixRule.checked;
     const useNameLabelRule = el.nameLabelRule.checked, useNameDict = el.nameDictRule.checked;
+    const useTableColumnRule = el.tableColumnRule.checked;
     for (const rec of state.pages) {
-      for (const e of findEntities(rec.text, { words, useSuffixRule, useNameLabelRule, useNameDict })) {
+      for (const e of findEntities(rec.text, { words, useSuffixRule, useNameLabelRule, useNameDict, useTableColumnRule, items: rec.items })) {
         const full = rangeRects(e.maskStart, e.maskEnd, rec.charMap);
         if (!full.length) continue;
         // 사람 이름(접미어 없음·2~4 한글)은 부분 시 가운데만, 그 외(기관)는 전체 동일
@@ -190,7 +194,7 @@
         const masked = rec.text.slice(e.maskStart, e.maskEnd), kept = rec.text.slice(e.maskEnd, e.end);
         // 자동탐지 출처를 말풍선에 표시 — 특히 사전(베타) 결과는 오탐 가능성이 있어
         // 검토 시 "왜 걸렸는지" 구분할 수 있어야 한다.
-        const kindTag = e.kind === "name-label" ? " [라벨]" : e.kind === "name-dict" ? " [사전·베타]" : "";
+        const kindTag = e.kind === "name-label" ? " [라벨]" : e.kind === "name-dict" ? " [사전·베타]" : e.kind === "name-column" ? " [표 열]" : "";
         addDet({ pageIndex: rec.pageIndex, category: "name", source: "entity", style: "symbol",
           fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + kindTag + (kept ? " +『" + kept + "』유지" : ""), entityKey: masked });
       }
@@ -295,6 +299,7 @@
   el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.nameLabelRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.nameDictRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.tableColumnRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
     el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));

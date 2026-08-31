@@ -454,6 +454,7 @@ body {
         <textarea id="wordList" class="wordlist" rows="4" placeholder="예시)&#10;홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
         <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
         <label class="chk"><input type="checkbox" id="nameLabelRule" checked /> <span>성명 라벨 자동 (「성명:」·「작성자」 등 라벨 바로 뒤 이름 자동 탐지)</span></label>
+        <label class="chk"><input type="checkbox" id="tableColumnRule" checked /> <span>표 열 구조 자동 (「성명」 등 열 헤더를 찾아 그 아래 칸을 전부 이름으로 탐지 — 명단 표에 효과적)</span></label>
         <label class="chk"><input type="checkbox" id="nameDictRule" /> <span>이름 사전 자동탐지 <b>(베타)</b> — 흔한 성씨로 시작하는 낱말을 이름으로 추정. 라벨 없이 사전만 보고 판단해 오탐이 있을 수 있으니, 켠 뒤 검토 화면에서 꼭 확인하세요.</span></label>
         <div class="symrow">
           <span class="muted">마스킹 문자 <small>(번호류 전용 — 이름·직접지정은 사람마다 다른 기호가 자동 배정됩니다)</small></span>
@@ -833,6 +834,7 @@ body {
     "이메일", "연락처", "전화", "전화번호", "휴대폰", "휴대전화", "팩스",
     "부서", "직급", "직위", "직책", "소속", "계좌", "계좌번호", "카드", "카드번호",
     "주소", "이름", "성명", "생년월일", "주민등록번호", "성별", "비고", "은행",
+    "명단", "현황", "목록", "내역", "명세",
   ];
 
   function execAllNames(re, text, out) {
@@ -983,10 +985,90 @@ body {
     return out;
   }
 
+  // ---------------- (5) 표 열 구조 인식 ----------------
+  // 감사보고서에 가장 흔한 표 형태 명단은 "연번·소속·성명·주민등록번호…" 같은
+  // 열 헤더가 맨 위에 한 번만 있고, 그 아래 각 행에는 라벨 없이 이름만 있다.
+  // (3)의 라벨 규칙은 라벨이 이름 바로 앞에 있을 때만 잡으므로 이런 표는
+  // 놓친다 — 대신 "성명" 헤더가 있는 열의 x좌표를 찾아, 그 아래로 같은
+  // x범위에 있는 칸들을 전부 이름 후보로 채택한다.
+  //
+  // PDF 텍스트 조각(item)은 좌표(transform)를 가지고 있어, 표를 만드는 도구
+  // (워드프로세서·리포트 라이브러리 대부분)는 각 칸을 별도 조각으로 그린다는
+  // 전제 위에서 동작한다 — 한 조각 안에 여러 칸이 합쳐진 표(예: 셀 사이에
+  // 탭 문자로만 구분)에는 적용되지 않는다(별도 한계로 남김).
+  const NAME_COLUMN_HEADERS = ["성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자"];
+
+  function itemX0(item) { return item.transform[4]; }
+  function itemX1(item) { return item.transform[4] + (item.width || 0); }
+  function itemY(item) { return item.transform[5]; }
+
+  /** items를 y좌표 기준으로 행(row)으로 묶는다(같은 줄 = y가 거의 같음). 위→아래 순. */
+  function groupRows(items) {
+    const withY = items.filter((it) => it.str && it.str.trim() && it.transform).map((it) => ({ it, y: itemY(it) }));
+    const rows = [];
+    for (const w of withY) {
+      let row = rows.find((r) => Math.abs(r.y - w.y) <= 3); // 3pt 이내면 같은 줄(대부분의 표는 같은 줄 오차가 1pt 미만)
+      if (!row) { row = { y: w.y, cells: [] }; rows.push(row); }
+      row.cells.push(w.it);
+    }
+    rows.sort((a, b) => b.y - a.y); // PDF 좌표는 아래로 갈수록 y가 작아짐 → 내림차순이 위→아래
+    for (const r of rows) r.cells.sort((a, b) => itemX0(a) - itemX0(b));
+    return rows;
+  }
+
+  /** row 안에서 헤더 셀의 열 구역(zone)—좌우 이웃 헤더와의 중간점—을 계산 */
+  function columnZone(row, headerCell) {
+    const idx = row.cells.indexOf(headerCell);
+    const left = idx > 0 ? (itemX1(row.cells[idx - 1]) + itemX0(headerCell)) / 2 : -Infinity;
+    const right = idx < row.cells.length - 1 ? (itemX1(headerCell) + itemX0(row.cells[idx + 1])) / 2 : Infinity;
+    return { left, right };
+  }
+
+  /** 셀 안에서 맨 앞 한글 2~4글자(이름으로 추정되는 부분)만 추출 */
+  function leadingHangulName(item) {
+    const lead = item.str.match(/^\s*/)[0].length;
+    const rest = item.str.slice(lead);
+    const m = rest.match(/^[가-힣]{2,4}/);
+    if (!m) return null;
+    if (NAME_COLUMN_HEADERS.includes(m[0])) return null; // 다음 표의 헤더를 다시 만난 경우
+    const start = item._gStart + lead;
+    return { start, end: start + m[0].length };
+  }
+
+  /**
+   * @param {Array} items  extractText()가 반환한 페이지의 item 배열
+   *                       (item.transform/.width/.str/._gStart 필요)
+   */
+  function collectTableColumnNames(items) {
+    if (!items || !items.length) return [];
+    const rows = groupRows(items);
+    const out = [];
+    for (let hi = 0; hi < rows.length; hi++) {
+      const headerCell = rows[hi].cells.find((c) => NAME_COLUMN_HEADERS.includes(c.str.trim()));
+      if (!headerCell) continue;
+      const zone = columnZone(rows[hi], headerCell);
+      // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
+      // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
+      for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
+        const row = rows[ri];
+        const cell = row.cells.find((c) => {
+          const cx = (itemX0(c) + itemX1(c)) / 2;
+          return cx >= zone.left && cx < zone.right;
+        });
+        if (!cell) break;
+        const name = leadingHangulName(cell);
+        if (!name) break;
+        out.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+      }
+    }
+    return out;
+  }
+
   /**
    * @param {string} text  페이지 텍스트
    * @param {object} opts  { words: string[], useSuffixRule: boolean,
-   *                          useNameLabelRule: boolean, useNameDict: boolean }
+   *                          useNameLabelRule: boolean, useNameDict: boolean,
+   *                          useTableColumnRule: boolean, items: Array }
    */
   function findEntities(text, opts) {
     if (!text) return [];
@@ -1028,6 +1110,9 @@ body {
     // (4) 성씨 사전 자동탐지(베타): 문맥 없이 사전만으로 판단해 오탐 위험이 있음
     if (opts.useNameDict) results.push(...collectDictionaryNames(text));
 
+    // (5) 표 열 구조 인식: "성명" 등 열 헤더 아래 칸을 전부 이름으로 간주
+    if (opts.useTableColumnRule && opts.items) results.push(...collectTableColumnNames(opts.items));
+
     // 겹침 정리: 시작이 이르고 길이가 긴 것 우선, 겹치면 뒤 후보 버림
     results.sort((a, b) => (a.start - b.start) || (b.end - a.end));
     const out = [];
@@ -1041,7 +1126,7 @@ body {
 
   global.PIIDetector = {
     CATEGORIES, detect, findEntities, ORG_SUFFIXES,
-    SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS,
+    SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS, NAME_COLUMN_HEADERS,
   };
 })(window);
 </script>
@@ -1344,7 +1429,8 @@ body {
 <script>/**
  * app-artifact.js — 단일 파일(아티팩트) 버전
  *  · 번호류(주민/전화/이메일/계좌/카드): 정규식 자동 탐지
- *  · 이름·기관/부서: 단어목록 + 접미어 규칙 (접미어는 유지)
+ *  · 이름·기관/부서: 단어목록 + 접미어 규칙(접미어는 유지) + 성명 라벨 규칙 +
+ *      표 열 구조 인식("성명" 열 헤더 아래 칸 전부) + 성씨 사전(베타)
  *  · 수동 마스킹: 페이지 위 드래그로 직접 지정
  *  · 마스킹 수준: 부분(표준) / 전체 선택
  *      - 부분: 주민번호 뒤7·전화 뒤4·이메일 아이디 일부·계좌 앞6 유지·카드 앞6뒤4 유지·이름 가운데
@@ -1392,6 +1478,7 @@ body {
     reportCard: id("reportCard"), entityCard: id("entityCard"), manualCard: id("manualCard"), dlCard: id("dlCard"),
     cats: id("cats"), totalCount: id("totalCount"),
     wordList: id("wordList"), suffixRule: id("suffixRule"), nameLabelRule: id("nameLabelRule"), nameDictRule: id("nameDictRule"),
+    tableColumnRule: id("tableColumnRule"),
     symPicker: id("symPicker"), applyEntities: id("applyEntities"),
     manualToggle: id("manualToggle"), sameWord: id("sameWord"), genBtn: id("genBtn"), result: id("result"),
     dlLink: id("dlLink"), dlLink2: id("dlLink2"), previewBtn: id("previewBtn"),
@@ -1442,6 +1529,7 @@ body {
     if (el.suffixRule) el.suffixRule.checked = true;
     if (el.nameLabelRule) el.nameLabelRule.checked = true;
     if (el.nameDictRule) el.nameDictRule.checked = false; // 베타 기능은 새 문서에서도 기본 꺼짐 유지
+    if (el.tableColumnRule) el.tableColumnRule.checked = true;
     // 직접 지정(수동) 모드도 끈 상태로 되돌린다.
     state.manualMode = false;
     if (el.sameWord) el.sameWord.checked = false;
@@ -1522,8 +1610,9 @@ body {
     removeDetsBySource("entity");
     const words = currentWords(), useSuffixRule = el.suffixRule.checked;
     const useNameLabelRule = el.nameLabelRule.checked, useNameDict = el.nameDictRule.checked;
+    const useTableColumnRule = el.tableColumnRule.checked;
     for (const rec of state.pages) {
-      for (const e of findEntities(rec.text, { words, useSuffixRule, useNameLabelRule, useNameDict })) {
+      for (const e of findEntities(rec.text, { words, useSuffixRule, useNameLabelRule, useNameDict, useTableColumnRule, items: rec.items })) {
         const full = rangeRects(e.maskStart, e.maskEnd, rec.charMap);
         if (!full.length) continue;
         // 사람 이름(접미어 없음·2~4 한글)은 부분 시 가운데만, 그 외(기관)는 전체 동일
@@ -1533,7 +1622,7 @@ body {
         const masked = rec.text.slice(e.maskStart, e.maskEnd), kept = rec.text.slice(e.maskEnd, e.end);
         // 자동탐지 출처를 말풍선에 표시 — 특히 사전(베타) 결과는 오탐 가능성이 있어
         // 검토 시 "왜 걸렸는지" 구분할 수 있어야 한다.
-        const kindTag = e.kind === "name-label" ? " [라벨]" : e.kind === "name-dict" ? " [사전·베타]" : "";
+        const kindTag = e.kind === "name-label" ? " [라벨]" : e.kind === "name-dict" ? " [사전·베타]" : e.kind === "name-column" ? " [표 열]" : "";
         addDet({ pageIndex: rec.pageIndex, category: "name", source: "entity", style: "symbol",
           fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + kindTag + (kept ? " +『" + kept + "』유지" : ""), entityKey: masked });
       }
@@ -1638,6 +1727,7 @@ body {
   el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.nameLabelRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.nameDictRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.tableColumnRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
     el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));

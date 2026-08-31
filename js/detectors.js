@@ -216,6 +216,7 @@
     "이메일", "연락처", "전화", "전화번호", "휴대폰", "휴대전화", "팩스",
     "부서", "직급", "직위", "직책", "소속", "계좌", "계좌번호", "카드", "카드번호",
     "주소", "이름", "성명", "생년월일", "주민등록번호", "성별", "비고", "은행",
+    "명단", "현황", "목록", "내역", "명세",
   ];
 
   function execAllNames(re, text, out) {
@@ -366,10 +367,90 @@
     return out;
   }
 
+  // ---------------- (5) 표 열 구조 인식 ----------------
+  // 감사보고서에 가장 흔한 표 형태 명단은 "연번·소속·성명·주민등록번호…" 같은
+  // 열 헤더가 맨 위에 한 번만 있고, 그 아래 각 행에는 라벨 없이 이름만 있다.
+  // (3)의 라벨 규칙은 라벨이 이름 바로 앞에 있을 때만 잡으므로 이런 표는
+  // 놓친다 — 대신 "성명" 헤더가 있는 열의 x좌표를 찾아, 그 아래로 같은
+  // x범위에 있는 칸들을 전부 이름 후보로 채택한다.
+  //
+  // PDF 텍스트 조각(item)은 좌표(transform)를 가지고 있어, 표를 만드는 도구
+  // (워드프로세서·리포트 라이브러리 대부분)는 각 칸을 별도 조각으로 그린다는
+  // 전제 위에서 동작한다 — 한 조각 안에 여러 칸이 합쳐진 표(예: 셀 사이에
+  // 탭 문자로만 구분)에는 적용되지 않는다(별도 한계로 남김).
+  const NAME_COLUMN_HEADERS = ["성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자"];
+
+  function itemX0(item) { return item.transform[4]; }
+  function itemX1(item) { return item.transform[4] + (item.width || 0); }
+  function itemY(item) { return item.transform[5]; }
+
+  /** items를 y좌표 기준으로 행(row)으로 묶는다(같은 줄 = y가 거의 같음). 위→아래 순. */
+  function groupRows(items) {
+    const withY = items.filter((it) => it.str && it.str.trim() && it.transform).map((it) => ({ it, y: itemY(it) }));
+    const rows = [];
+    for (const w of withY) {
+      let row = rows.find((r) => Math.abs(r.y - w.y) <= 3); // 3pt 이내면 같은 줄(대부분의 표는 같은 줄 오차가 1pt 미만)
+      if (!row) { row = { y: w.y, cells: [] }; rows.push(row); }
+      row.cells.push(w.it);
+    }
+    rows.sort((a, b) => b.y - a.y); // PDF 좌표는 아래로 갈수록 y가 작아짐 → 내림차순이 위→아래
+    for (const r of rows) r.cells.sort((a, b) => itemX0(a) - itemX0(b));
+    return rows;
+  }
+
+  /** row 안에서 헤더 셀의 열 구역(zone)—좌우 이웃 헤더와의 중간점—을 계산 */
+  function columnZone(row, headerCell) {
+    const idx = row.cells.indexOf(headerCell);
+    const left = idx > 0 ? (itemX1(row.cells[idx - 1]) + itemX0(headerCell)) / 2 : -Infinity;
+    const right = idx < row.cells.length - 1 ? (itemX1(headerCell) + itemX0(row.cells[idx + 1])) / 2 : Infinity;
+    return { left, right };
+  }
+
+  /** 셀 안에서 맨 앞 한글 2~4글자(이름으로 추정되는 부분)만 추출 */
+  function leadingHangulName(item) {
+    const lead = item.str.match(/^\s*/)[0].length;
+    const rest = item.str.slice(lead);
+    const m = rest.match(/^[가-힣]{2,4}/);
+    if (!m) return null;
+    if (NAME_COLUMN_HEADERS.includes(m[0])) return null; // 다음 표의 헤더를 다시 만난 경우
+    const start = item._gStart + lead;
+    return { start, end: start + m[0].length };
+  }
+
+  /**
+   * @param {Array} items  extractText()가 반환한 페이지의 item 배열
+   *                       (item.transform/.width/.str/._gStart 필요)
+   */
+  function collectTableColumnNames(items) {
+    if (!items || !items.length) return [];
+    const rows = groupRows(items);
+    const out = [];
+    for (let hi = 0; hi < rows.length; hi++) {
+      const headerCell = rows[hi].cells.find((c) => NAME_COLUMN_HEADERS.includes(c.str.trim()));
+      if (!headerCell) continue;
+      const zone = columnZone(rows[hi], headerCell);
+      // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
+      // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
+      for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
+        const row = rows[ri];
+        const cell = row.cells.find((c) => {
+          const cx = (itemX0(c) + itemX1(c)) / 2;
+          return cx >= zone.left && cx < zone.right;
+        });
+        if (!cell) break;
+        const name = leadingHangulName(cell);
+        if (!name) break;
+        out.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+      }
+    }
+    return out;
+  }
+
   /**
    * @param {string} text  페이지 텍스트
    * @param {object} opts  { words: string[], useSuffixRule: boolean,
-   *                          useNameLabelRule: boolean, useNameDict: boolean }
+   *                          useNameLabelRule: boolean, useNameDict: boolean,
+   *                          useTableColumnRule: boolean, items: Array }
    */
   function findEntities(text, opts) {
     if (!text) return [];
@@ -411,6 +492,9 @@
     // (4) 성씨 사전 자동탐지(베타): 문맥 없이 사전만으로 판단해 오탐 위험이 있음
     if (opts.useNameDict) results.push(...collectDictionaryNames(text));
 
+    // (5) 표 열 구조 인식: "성명" 등 열 헤더 아래 칸을 전부 이름으로 간주
+    if (opts.useTableColumnRule && opts.items) results.push(...collectTableColumnNames(opts.items));
+
     // 겹침 정리: 시작이 이르고 길이가 긴 것 우선, 겹치면 뒤 후보 버림
     results.sort((a, b) => (a.start - b.start) || (b.end - a.end));
     const out = [];
@@ -424,6 +508,6 @@
 
   global.PIIDetector = {
     CATEGORIES, detect, findEntities, ORG_SUFFIXES,
-    SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS,
+    SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS, NAME_COLUMN_HEADERS,
   };
 })(window);
