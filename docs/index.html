@@ -647,10 +647,18 @@ body {
   const SEP = "[-\\s.]{0,3}";
 
   // 주민등록번호: 앞 6자리(생년월일) + 뒤 7자리. 성별코드(뒤 첫자리) 1~4(내국인)·5~8(외국인).
-  const RE_RRN = new RegExp("(?<![0-9])(\\d{6})" + SEP + "([1-8]\\d{6})(?![0-9])", "g");
+  // 앞에 쉼표가 오면 시작하지 않음 → 금액("1,840,000")의 끝자리가 뒤이어 나오는
+  // 다른 숫자와 이어붙어 잘못된 매치를 만드는 것을 방지(SEP가 구분자 0개도
+  // 허용해 순수 숫자 나열도 매치되기 때문— RE_PHONE 주석 참고).
+  const RE_RRN = new RegExp("(?<![0-9,])(\\d{6})" + SEP + "([1-8]\\d{6})(?![0-9])", "g");
 
   // 전화번호: 휴대전화(01X) 및 유선(0XX).
-  const RE_PHONE = new RegExp("(?<![0-9])(0\\d{1,2})" + SEP + "(\\d{3,4})" + SEP + "(\\d{4})(?![0-9])", "g");
+  // SEP가 구분자 0개(빈 문자열)도 허용하므로, 실제로는 "숫자만 있어도" 매치될 수
+  // 있다. 그래서 "1,840,000 110-234-567890"처럼 쉼표로 끊긴 금액의 끝자리 0들과
+  // 그 뒤 계좌번호 앞부분이 공백 하나로 이어붙어 "000 301-0123" 같은 실재하지
+  // 않는 전화번호로 오탐되는 사례가 실제 문서 검증 중 발견됐다. 쉼표 바로
+  // 뒤에서는 시작하지 않게 해 이 경로를 차단한다.
+  const RE_PHONE = new RegExp("(?<![0-9,])(0\\d{1,2})" + SEP + "(\\d{3,4})" + SEP + "(\\d{4})(?![0-9])", "g");
 
   // 이메일
   const RE_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -662,7 +670,7 @@ body {
   // 카드번호: 국내 카드(신용·체크) 표준 표기인 4자리씩 4묶음(16자리). 구분자는
   // 하이픈/공백 0~1개(표 안에서는 구분자 없이 붙여쓰기도 흔함). 15자리(Amex류
   // 4-6-5 구성)는 국내 실무 문서에서 드물어 이 MVP 범위 밖으로 둔다.
-  const RE_CARD = /(?<![0-9])\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?![0-9])/g;
+  const RE_CARD = /(?<![0-9,])\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?![0-9])/g;
 
   /**
    * 정규식 매칭 전 텍스트를 정규화한다. 반드시 "길이 보존"이어야
@@ -794,27 +802,48 @@ body {
   // 이 둘은 **콜론이 있을 때만**(STRICT) 인정하고, 사람을 직접 가리켜 일반
   // 명사로 쓰일 일이 거의 없는 나머지 라벨(LOOSE)만 공백 구분도 허용한다.
   const NAME_LABELS_STRICT = ["성명", "이름"];
+  // "감사담당자"처럼 "담당자" 앞에 수식어가 붙는 복합어는 일부러 넣지 않는다 —
+  // 실제 문서에서는 "감사담당자 연락처:", "감사담당자 이메일:"처럼 그 뒤에
+  // 사람 이름이 아니라 "또 다른 항목명"이 이어지는 경우가 더 흔해서, 넣으면
+  // 그 항목명(예: "연락처")을 이름으로 오탐하는 사례가 실제 문서 검증 중
+  // 나왔다. 이름을 직접 소개하는 홑낱말 라벨만 남긴다.
   const NAME_LABELS_LOOSE = [
     "담당자", "작성자", "검토자", "확인자", "결재자",
     "피감사자", "감사대상자", "대표자", "면담자", "보고자", "인수자", "인계자",
   ];
   const NAME_LABELS = NAME_LABELS_STRICT.concat(NAME_LABELS_LOOSE);
+  // 라벨 앞에 한글이 더 있으면(예: "감사담당자"의 "담당자") 그 라벨의 일부가
+  // 아니라 더 긴 낱말의 뒷부분일 뿐이므로 매치하지 않는다. 이 가드가 없으면
+  // "감사담당자 연락처: …"에서 "담당자"가 라벨로 오매치되고, 바로 뒤의
+  // "연락처"라는 낱말이 사람 이름인 것처럼 잘못 잡힌다.
+  const NOT_PRECEDED_BY_HANGUL = "(?<![가-힣])";
   const PAREN = "(?:\\([^)]{0,10}\\))?"; // 괄호 부기(예: "성명(직급)") 선택적으로 허용
   const NAME_CAPTURE = "([가-힣]{2,4})(?![가-힣])"; // 이름 2~4글자(뒤에 한글이 더 이어지면 제외)
   const RE_LABELED_NAME_STRICT = new RegExp(
-    "(?:" + NAME_LABELS_STRICT.join("|") + ")" + PAREN + "[\\s]*[:：]\\s*" + NAME_CAPTURE, "g"
+    NOT_PRECEDED_BY_HANGUL + "(?:" + NAME_LABELS_STRICT.join("|") + ")" + PAREN + "[\\s]*[:：]\\s*" + NAME_CAPTURE, "g"
   );
   const RE_LABELED_NAME_LOOSE = new RegExp(
-    "(?:" + NAME_LABELS_LOOSE.join("|") + ")" + PAREN + "[\\s:：]+" + NAME_CAPTURE, "g"
+    NOT_PRECEDED_BY_HANGUL + "(?:" + NAME_LABELS_LOOSE.join("|") + ")" + PAREN + "[\\s:：]+" + NAME_CAPTURE, "g"
   );
+
+  // "담당자 이메일:", "성명 확인란" 처럼 라벨 바로 뒤에 사람 이름이 아니라
+  // "또 다른 항목명"이 이어지는 복합 표현에서, 그 항목명 자체가 이름으로
+  // 잘못 캡처되는 걸 막기 위한 차단 목록(실제 문서 검증 중 발견).
+  const NON_NAME_FIELD_WORDS = [
+    "이메일", "연락처", "전화", "전화번호", "휴대폰", "휴대전화", "팩스",
+    "부서", "직급", "직위", "직책", "소속", "계좌", "계좌번호", "카드", "카드번호",
+    "주소", "이름", "성명", "생년월일", "주민등록번호", "성별", "비고", "은행",
+  ];
 
   function execAllNames(re, text, out) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(text)) !== null) {
       const name = m[1];
-      const start = m.index + m[0].length - name.length;
-      out.push({ start, end: start + name.length, maskStart: start, maskEnd: start + name.length, kind: "name-label" });
+      if (!NON_NAME_FIELD_WORDS.includes(name)) {
+        const start = m.index + m[0].length - name.length;
+        out.push({ start, end: start + name.length, maskStart: start, maskEnd: start + name.length, kind: "name-label" });
+      }
       if (m.index === re.lastIndex) re.lastIndex++;
     }
   }
