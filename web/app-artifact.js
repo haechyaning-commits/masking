@@ -24,7 +24,7 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText], { type: "application/javascript" }));
   } catch (e) { console.warn("worker 설정 실패", e); }
 
-  const VIEW_SCALE = 1.3, RASTER_SCALE = 3.0;
+  const VIEW_SCALE = 1.3, RASTER_SCALE = 3.0, OCR_SCALE = 3.0;
   const SYMBOL_FONT = '"WenQuanYi Zen Hei", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
   // 검토(자동 탐지) 리포트에는 번호류만 — 이름·기관/수동은 각 단계에서 별도 표시
   const AUTO_CATS = [
@@ -80,12 +80,17 @@
       clearMessage(); showLoader("PDF를 읽는 중…"); resetState();
       state.fileName = file.name; state.originalBytes = await file.arrayBuffer();
       el.fname.hidden = false; el.fname.querySelector("span").textContent = file.name;
-      const hadText = await processPdf(state.originalBytes.slice(0));
+      const { hadRealText, ocrPages } = await processPdf(state.originalBytes.slice(0));
       reDetectEntities(); renderReport();
       [el.reportCard, el.entityCard, el.manualCard, el.dlCard].forEach((c) => (c.hidden = false));
       el.empty.hidden = true; el.undoBtn.hidden = false;
       el.uploadMeta.textContent = state.pages.length + "쪽";
-      if (!hadText) showMessage("이 PDF에서 <b>선택 가능한 텍스트를 찾지 못했습니다.</b> 스캔본(이미지) PDF는 지원하지 않습니다. (OCR 필요)", "warn");
+      const hadAnyText = hadRealText || state.pages.some((p) => p.text.trim());
+      if (!hadAnyText) {
+        showMessage("이 PDF에서 <b>텍스트를 찾지 못했습니다.</b> 스캔본으로 보고 OCR을 시도했지만 인식에 실패했습니다(해상도가 너무 낮거나 손글씨일 수 있음). <b>직접 지정(클릭/드래그)</b>으로 가려주세요.", "warn");
+      } else if (ocrPages.length) {
+        showMessage(`<b>${ocrPages.length}쪽</b>은 텍스트 레이어가 없어 OCR로 인식했습니다(${ocrPages.join(", ")}쪽). OCR은 실제 텍스트보다 <b>오탐·누락이 더 있을 수 있으니</b> 검토 화면에서 특히 꼼꼼히 확인하세요. 이름 자동탐지(라벨·표 열 인식)는 OCR 페이지에서 정확도가 낮습니다 — 필요하면 직접 지정을 함께 쓰세요.`, "warn");
+      }
     } catch (err) { console.error(err); showMessage("<b>PDF 처리 중 오류.</b> " + (err && err.message ? err.message : err), "err"); }
     finally { clearTimeout(watchdog); hideLoader(); }
   }
@@ -111,21 +116,57 @@
     }
   }
 
+  // ================= OCR(스캔본) =================
+  // 텍스트 레이어가 없는 페이지(스캔본)를 위한 Tesseract.js 워커. 최초 필요한
+  // 시점에 한 번만 만들고(완전 오프라인 — 코드/학습데이터 전부 이 파일 안에
+  // 내장) 이후 페이지들은 재사용한다.
+  function getOcrWorker() {
+    return window.MaskOCR.getOcrWorker({
+      coreText: document.getElementById("tessCoreSrc").textContent,
+      workerText: document.getElementById("tessWorkerSrc").textContent,
+      korDataB64: document.getElementById("tessKorData").textContent,
+    });
+  }
+  /** OCR 전용 고해상도 렌더 — 화면 표시용 캔버스(VIEW_SCALE)와는 별도로 오프스크린에 그림 */
+  async function renderForOcr(page) {
+    const viewport = page.getViewport({ scale: OCR_SCALE });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    return canvas;
+  }
+
   // ================= PDF 처리 =================
   async function processPdf(buffer) {
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-    let hadText = false;
+    let hadRealText = false;
+    const ocrPages = [];
     for (let n = 1; n <= pdf.numPages; n++) {
       showLoader(`페이지 분석 중… (${n}/${pdf.numPages})`);
       const page = await pdf.getPage(n);
       const base = page.getViewport({ scale: 1 }), pageIndex = n - 1;
       const meta = { widthPts: base.width, heightPts: base.height };
       const pw = await renderPage(page, pageIndex);
-      const { text, charMap, items } = await extractText(page);
-      if (text.trim()) hadText = true;
-      // 각 텍스트 조각의 실제 임베드 폰트명을 저장 → 마스킹 위치를 정확히 측정
-      for (const item of items) { try { const fo = page.commonObjs.get(item.fontName); if (fo && fo.loadedName) item._font = fo.loadedName; } catch (e) {} }
-      const rec = { pageIndex, meta, text, charMap, items, ov: pw._ov, pw };
+      let { text, charMap, items } = await extractText(page);
+      let isOcr = false;
+      if (text.trim()) {
+        hadRealText = true;
+        // 각 텍스트 조각의 실제 임베드 폰트명을 저장 → 마스킹 위치를 정확히 측정
+        for (const item of items) { try { const fo = page.commonObjs.get(item.fontName); if (fo && fo.loadedName) item._font = fo.loadedName; } catch (e) {} }
+      } else {
+        // 텍스트 레이어가 전혀 없는 페이지 — 스캔본으로 보고 OCR 시도.
+        // 번호류(주민번호·전화·계좌·카드·이메일)는 실측으로 잘 잡히지만, 이름
+        // 자동탐지(라벨/표 열/사전)는 OCR 특성상 정확도가 떨어질 수 있다(README 참고).
+        try {
+          showLoader(`OCR로 스캔본 인식 중… (${n}/${pdf.numPages})`);
+          const worker = await getOcrWorker();
+          const canvas = await renderForOcr(page);
+          const ocrRec = await window.MaskOCR.ocrCanvasToRec(worker, canvas, OCR_SCALE, meta);
+          text = ocrRec.text; charMap = ocrRec.charMap; items = ocrRec.items;
+          if (text.trim()) { isOcr = true; ocrPages.push(n); }
+        } catch (e) { console.warn("OCR 실패(페이지 " + n + ")", e); }
+      }
+      const rec = { pageIndex, meta, text, charMap, items, ov: pw._ov, pw, isOcr };
       state.pages.push(rec); enableManualDrag(rec);
       for (const m of detect(text)) {
         const full = rangeRects(m.start, m.end, charMap);
@@ -135,7 +176,7 @@
           fullRects: full, partialRects: rangeRects(pa, pb, charMap), value: m.value });
       }
     }
-    return hadText;
+    return { hadRealText, ocrPages };
   }
   async function renderPage(page, pageIndex) {
     const viewport = page.getViewport({ scale: VIEW_SCALE }), outputScale = window.devicePixelRatio || 1;
