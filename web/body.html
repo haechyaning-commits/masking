@@ -45,6 +45,8 @@
         <label class="fieldlabel" for="wordList">가릴 단어 목록 <span class="muted">(한 줄에 하나 — 이름, 기관/부서명 등)</span></label>
         <textarea id="wordList" class="wordlist" rows="4" placeholder="예시)&#10;홍길동&#10;서울복지센터&#10;감사담당관실"></textarea>
         <label class="chk"><input type="checkbox" id="suffixRule" checked /> <span>접미어 규칙 자동 (센터·사무소·구청·주식회사·병원 등으로 끝나는 이름 앞부분 자동 탐지)</span></label>
+        <label class="chk"><input type="checkbox" id="nameLabelRule" checked /> <span>성명 라벨 자동 (「성명:」·「작성자」 등 라벨 바로 뒤 이름 자동 탐지)</span></label>
+        <label class="chk"><input type="checkbox" id="nameDictRule" /> <span>이름 사전 자동탐지 <b>(베타)</b> — 흔한 성씨로 시작하는 낱말을 이름으로 추정. 라벨 없이 사전만 보고 판단해 오탐이 있을 수 있으니, 켠 뒤 검토 화면에서 꼭 확인하세요.</span></label>
         <div class="symrow">
           <span class="muted">마스킹 문자 <small>(번호류 전용 — 이름·직접지정은 사람마다 다른 기호가 자동 배정됩니다)</small></span>
           <div class="syms" id="symPicker">

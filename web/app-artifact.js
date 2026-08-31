@@ -48,7 +48,8 @@
     msg: id("msg"), drop: id("drop"), fileInput: id("fileInput"), fname: id("fname"),
     reportCard: id("reportCard"), entityCard: id("entityCard"), manualCard: id("manualCard"), dlCard: id("dlCard"),
     cats: id("cats"), totalCount: id("totalCount"),
-    wordList: id("wordList"), suffixRule: id("suffixRule"), symPicker: id("symPicker"), applyEntities: id("applyEntities"),
+    wordList: id("wordList"), suffixRule: id("suffixRule"), nameLabelRule: id("nameLabelRule"), nameDictRule: id("nameDictRule"),
+    symPicker: id("symPicker"), applyEntities: id("applyEntities"),
     manualToggle: id("manualToggle"), sameWord: id("sameWord"), genBtn: id("genBtn"), result: id("result"),
     dlLink: id("dlLink"), dlLink2: id("dlLink2"), previewBtn: id("previewBtn"),
     previewModal: id("previewModal"), pvBody: id("pvBody"), pvClose: id("pvClose"),
@@ -96,6 +97,8 @@
     // 새 파일이면 이름·기관 가리기 입력도 초기화 → 새 문서에 맞춰 새로 작성.
     el.wordList.value = "";
     if (el.suffixRule) el.suffixRule.checked = true;
+    if (el.nameLabelRule) el.nameLabelRule.checked = true;
+    if (el.nameDictRule) el.nameDictRule.checked = false; // 베타 기능은 새 문서에서도 기본 꺼짐 유지
     // 직접 지정(수동) 모드도 끈 상태로 되돌린다.
     state.manualMode = false;
     if (el.sameWord) el.sameWord.checked = false;
@@ -175,8 +178,9 @@
   function reDetectEntities() {
     removeDetsBySource("entity");
     const words = currentWords(), useSuffixRule = el.suffixRule.checked;
+    const useNameLabelRule = el.nameLabelRule.checked, useNameDict = el.nameDictRule.checked;
     for (const rec of state.pages) {
-      for (const e of findEntities(rec.text, { words, useSuffixRule })) {
+      for (const e of findEntities(rec.text, { words, useSuffixRule, useNameLabelRule, useNameDict })) {
         const full = rangeRects(e.maskStart, e.maskEnd, rec.charMap);
         if (!full.length) continue;
         // 사람 이름(접미어 없음·2~4 한글)은 부분 시 가운데만, 그 외(기관)는 전체 동일
@@ -184,8 +188,11 @@
         let pa = e.maskStart, pb = e.maskEnd;
         if (isName) { const len = e.maskEnd - e.maskStart; pa = e.maskStart + 1; pb = len <= 2 ? e.maskEnd : e.maskEnd - 1; }
         const masked = rec.text.slice(e.maskStart, e.maskEnd), kept = rec.text.slice(e.maskEnd, e.end);
+        // 자동탐지 출처를 말풍선에 표시 — 특히 사전(베타) 결과는 오탐 가능성이 있어
+        // 검토 시 "왜 걸렸는지" 구분할 수 있어야 한다.
+        const kindTag = e.kind === "name-label" ? " [라벨]" : e.kind === "name-dict" ? " [사전·베타]" : "";
         addDet({ pageIndex: rec.pageIndex, category: "name", source: "entity", style: "symbol",
-          fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + (kept ? " +『" + kept + "』유지" : ""), entityKey: masked });
+          fullRects: full, partialRects: rangeRects(pa, pb, rec.charMap), value: masked + kindTag + (kept ? " +『" + kept + "』유지" : ""), entityKey: masked });
       }
     }
   }
@@ -286,6 +293,8 @@
   // ================= 컨트롤 =================
   el.applyEntities.addEventListener("click", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.suffixRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.nameLabelRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
+  el.nameDictRule.addEventListener("change", () => { snapshot(); reDetectEntities(); renderReport(); });
   el.symPicker.addEventListener("click", (e) => {
     const b = e.target.closest(".sym"); if (!b) return;
     el.symPicker.querySelectorAll(".sym").forEach((x) => x.classList.remove("on"));
