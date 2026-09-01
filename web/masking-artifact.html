@@ -1319,8 +1319,43 @@ else if (typeof exports === 'object')
     return out;
   }
 
+  // 칸 구분 없이 표를 흉내 낸 문서(예: 단순 텍스트를 그대로 PDF로 찍어낸
+  // 경우) 대응 — 표 전체가 칸별로 나뉘지 않고 "성명    소속    연락처"처럼
+  // 공백(3칸 이상)이나 탭 문자로만 줄을 맞춘 한 덩어리 조각(item)으로 되어
+  // 있으면, 그 구분자를 기준으로 여러 개의 가짜 조각(virtual item)으로
+  // 쪼갠다. x좌표는 조각 폭을 글자 수 비율로 나눈 근사치일 뿐이지만 — 열
+  // 구역(zone) 판정에는 이 정도 정확도면 충분하고, 실제 마스킹 박스는
+  // 어차피 이 함수가 아니라 원본 조각의 실측 글자 폭(rangeRects/itemSubRect,
+  // mask-engine.js)으로 그려지므로 근사치가 최종 결과 정확도에 영향을 주지
+  // 않는다(_gStart를 원본 문자열 안의 진짜 오프셋으로 정확히 넘기기만 하면 됨).
+  const WIDE_ITEM_SEP = /\t+| {3,}/g;
+  function splitWideItems(items) {
+    const out = [];
+    for (const it of items) {
+      WIDE_ITEM_SEP.lastIndex = 0;
+      const str = it.str;
+      const parts = []; // [start,end) 구분자가 아닌 구간들
+      let last = 0, m;
+      while ((m = WIDE_ITEM_SEP.exec(str)) !== null) {
+        if (m.index > last) parts.push([last, m.index]);
+        last = m.index + m[0].length;
+      }
+      if (last < str.length) parts.push([last, str.length]);
+      if (parts.length < 2 || !it.transform) { out.push(it); continue; } // 구분자가 없거나 한 조각뿐이면 그대로
+      const x0 = itemX0(it), w = it.width || 0;
+      for (const [s, e] of parts) {
+        const segX0 = x0 + w * (s / str.length);
+        const segW = w * ((e - s) / str.length);
+        const t = it.transform.slice(); t[4] = segX0; // 조각별 x0만 바꾼 가짜 transform
+        out.push({ str: str.slice(s, e), transform: t, width: segW, _gStart: it._gStart + s });
+      }
+    }
+    return out;
+  }
+
   /** items를 y좌표 기준으로 행(row)으로 묶는다(같은 줄 = y가 거의 같음). 위→아래 순. */
   function groupRows(items) {
+    items = splitWideItems(items);
     const withY = items.filter((it) => it.str && it.str.trim() && it.transform).map((it) => ({ it, y: itemY(it) }));
     const rows = [];
     for (const w of withY) {
