@@ -39,11 +39,36 @@
     return { x0: t[4], top: t[5] + fh * 0.9, bottom: t[5] - fh * 0.28, w: item.width || fh * (item.str.length || 1), fh };
   }
 
+  // ================= 회전(세로쓰기 등) 텍스트 판별 =================
+  // 이 파일의 좌표 계산(itemBBox/itemSubRect/itemCharXs 등)은 전부 가로쓰기를
+  // 전제한다 — transform 행렬 [a,b,c,d,e,f]에서 b,c가 0(글자가 x축과 나란함)이라고
+  // 가정하고 폭·베이스라인을 계산한다. 세로쓰기·기울어진 도장처럼 실제로 회전된
+  // 조각에 같은 계산을 적용하면 마스킹 박스가 엉뚱한 자리에 그려질 수 있어
+  // 위험하다. "완전한 회전 지원"(임의 각도로 정확히 박스를 그리는 것) 대신,
+  // 회전된 조각은 자동탐지·클릭선택·드래그스냅에서 전부 제외하고(있는 그대로
+  // 두면 아래 각 함수가 안전하게 건너뛴다) 사용자가 직접 드래그로 가리도록
+  // 안내하는 "안전한" 접근을 택했다(README 로드맵 참고).
+  const ROTATION_TOLERANCE_RAD = 0.06; // 약 3.4도 — 폰트 렌더링 오차 정도는 허용
+  function itemRotationRad(item) {
+    const t = item.transform;
+    return Math.atan2(t[1], t[0]);
+  }
+  // 위아래가 뒤집힌 가로쓰기(180도)는 b,c가 0에 가까워 이 함수 기준으로는
+  // "회전 아님"으로 잡힌다 — 아직 그 케이스까지 다루진 않지만 흔치 않고,
+  // 여기서 걸러내려는 것은 세로쓰기처럼 좌표 계산 자체가 틀어지는 경우다.
+  function isRotatedItem(item) {
+    const t = item.transform; if (!t) return false;
+    let a = itemRotationRad(item) % Math.PI;
+    if (a > Math.PI / 2) a -= Math.PI; else if (a < -Math.PI / 2) a += Math.PI;
+    return Math.abs(a) > ROTATION_TOLERANCE_RAD;
+  }
+
   // 클릭 지점을 조각(item)에 맞춘다. 정확히 얹히지 않아도 가장 가까운 글자 조각을
   // (약 1.2줄 높이 이내) 채택 → 드래그/클릭 위치가 조금 어긋나도 단어를 잡는다.
   function itemAtPoint(rec, px, py) {
     let best = null, bestDist = Infinity;
     for (const item of rec.items) {
+      if (isRotatedItem(item)) continue; // 회전된 글자는 좌표 계산이 안 맞음 — 클릭 선택에서 제외(드래그로 가려야 함)
       const b = itemBBox(item);
       const inX = px >= b.x0 - 1 && px <= b.x0 + b.w + 1;
       const inY = py >= b.bottom && py <= b.top;
@@ -94,6 +119,7 @@
   const _mc = document.createElement("canvas").getContext("2d");
   function itemSubRect(item, startOffset, endOffset) {
     const t = item.transform; if (!t) return null;
+    if (isRotatedItem(item)) return null; // 세로쓰기 등 회전된 글자 — 자동 마스킹에서 안전하게 제외(위 설명 참고)
     const x0 = t[4], yBaseline = t[5];
     const fontHeight = Math.hypot(t[2], t[3]) || Math.hypot(t[0], t[1]) || 10;
     const str = item.str, totalWidth = item.width || fontHeight * (str.length || 1);
@@ -123,6 +149,11 @@
     const bx0 = box.x, bx1 = box.x + box.w, by0 = box.y, by1 = box.y + box.h;
     const hits = [];
     for (const item of rec.items) {
+      // 회전된 글자는 이 함수의 가로쓰기 전제(itemCharXs)가 맞지 않아 건너뛴다.
+      // 드래그 영역이 회전된 글자 위뿐이면 hits가 비어 null을 돌려주고,
+      // 호출부(app-artifact.js)가 사용자가 드래그한 사각형을 그대로 쓴다 —
+      // 이게 세로쓰기 페이지에서 "직접 지정"이 안전하게 동작하는 이유다.
+      if (isRotatedItem(item)) continue;
       const info = itemCharXs(item);
       const top = info.baseline + info.fontHeight * 0.8, bot = info.baseline - info.fontHeight * 0.2;
       // 세로: 어중간하게 스치기만 한 옆줄까지 끌려오지 않도록, 줄 높이의 40% 이상
@@ -288,6 +319,7 @@
     extractText,
     TOKEN_DELIM, isWordChar, itemBBox, itemAtPoint, findTokenAtPoint,
     itemSubRect, rangeRects, itemCharXs, snapDragToText,
+    itemRotationRad, isRotatedItem,
     digitIdx, piiPartial,
     ENTITY_SYMBOL_PALETTE, createSymbolAssigner,
     drawChars, drawPageMasks, buildRaster,

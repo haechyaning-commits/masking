@@ -17,6 +17,7 @@
   const {
     extractText, findTokenAtPoint, rangeRects,
     snapDragToText, piiPartial, createSymbolAssigner, buildRaster: engineBuildRaster,
+    isRotatedItem,
   } = window.MaskEngine;
 
   try {
@@ -80,7 +81,7 @@
       clearMessage(); showLoader("PDF를 읽는 중…"); resetState();
       state.fileName = file.name; state.originalBytes = await file.arrayBuffer();
       el.fname.hidden = false; el.fname.querySelector("span").textContent = file.name;
-      const { hadRealText, ocrPages } = await processPdf(state.originalBytes.slice(0));
+      const { hadRealText, ocrPages, rotatedPages } = await processPdf(state.originalBytes.slice(0));
       reDetectEntities(); renderReport();
       [el.reportCard, el.entityCard, el.manualCard, el.dlCard].forEach((c) => (c.hidden = false));
       el.empty.hidden = true; el.undoBtn.hidden = false;
@@ -88,8 +89,16 @@
       const hadAnyText = hadRealText || state.pages.some((p) => p.text.trim());
       if (!hadAnyText) {
         showMessage("이 PDF에서 <b>텍스트를 찾지 못했습니다.</b> 스캔본으로 보고 OCR을 시도했지만 인식에 실패했습니다(해상도가 너무 낮거나 손글씨일 수 있음). <b>직접 지정(클릭/드래그)</b>으로 가려주세요.", "warn");
-      } else if (ocrPages.length) {
-        showMessage(`<b>${ocrPages.length}쪽</b>은 텍스트 레이어가 없어 OCR로 인식했습니다(${ocrPages.join(", ")}쪽). OCR은 실제 텍스트보다 <b>오탐·누락이 더 있을 수 있으니</b> 검토 화면에서 특히 꼼꼼히 확인하세요. 이름 자동탐지(라벨·표 열 인식)는 OCR 페이지에서 정확도가 낮습니다 — 필요하면 직접 지정을 함께 쓰세요.`, "warn");
+      } else {
+        // OCR 안내와 세로쓰기 안내는 서로 다른 페이지에서 동시에 나올 수 있어 함께 표시한다.
+        const parts = [];
+        if (ocrPages.length) {
+          parts.push(`<b>${ocrPages.length}쪽</b>은 텍스트 레이어가 없어 OCR로 인식했습니다(${ocrPages.join(", ")}쪽). OCR은 실제 텍스트보다 <b>오탐·누락이 더 있을 수 있으니</b> 검토 화면에서 특히 꼼꼼히 확인하세요. 이름 자동탐지(라벨·표 열 인식)는 OCR 페이지에서 정확도가 낮습니다 — 필요하면 직접 지정을 함께 쓰세요.`);
+        }
+        if (rotatedPages.length) {
+          parts.push(`<b>${rotatedPages.length}쪽</b>에 <b>세로쓰기·회전된 글자</b>가 있습니다(${rotatedPages.join(", ")}쪽). 이런 글자는 위치 계산이 부정확해질 수 있어 자동탐지에서 <b>안전하게 제외</b>했습니다 — 그 페이지는 꼭 <b>직접 지정(드래그)</b>으로 확인하고 가려주세요.`);
+        }
+        if (parts.length) showMessage(parts.join("<br><br>"), "warn");
       }
     } catch (err) { console.error(err); showMessage("<b>PDF 처리 중 오류.</b> " + (err && err.message ? err.message : err), "err"); }
     finally { clearTimeout(watchdog); hideLoader(); }
@@ -141,6 +150,7 @@
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     let hadRealText = false;
     const ocrPages = [];
+    const rotatedPages = []; // 세로쓰기 등 회전된 글자가 있어 자동탐지에서 제외한 페이지
     for (let n = 1; n <= pdf.numPages; n++) {
       showLoader(`페이지 분석 중… (${n}/${pdf.numPages})`);
       const page = await pdf.getPage(n);
@@ -166,6 +176,9 @@
           if (text.trim()) { isOcr = true; ocrPages.push(n); }
         } catch (e) { console.warn("OCR 실패(페이지 " + n + ")", e); }
       }
+      // 세로쓰기 등 회전된 조각이 있으면(OCR 조각은 항상 회전 없음) 자동탐지가
+      // 이 페이지에서 일부 놓칠 수 있다는 뜻 — 사용자에게 직접 지정을 안내한다.
+      if (!isOcr && items.some((it) => isRotatedItem(it))) rotatedPages.push(n);
       const rec = { pageIndex, meta, text, charMap, items, ov: pw._ov, pw, isOcr };
       state.pages.push(rec); enableManualDrag(rec);
       for (const m of detect(text)) {
@@ -176,7 +189,7 @@
           fullRects: full, partialRects: rangeRects(pa, pb, charMap), value: m.value });
       }
     }
-    return { hadRealText, ocrPages };
+    return { hadRealText, ocrPages, rotatedPages };
   }
   async function renderPage(page, pageIndex) {
     const viewport = page.getViewport({ scale: VIEW_SCALE }), outputScale = window.devicePixelRatio || 1;
