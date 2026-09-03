@@ -1392,14 +1392,31 @@ else if (typeof exports === 'object')
   // 감사보고서에 가장 흔한 표 형태 명단은 "연번·소속·성명·주민등록번호…" 같은
   // 열 헤더가 맨 위에 한 번만 있고, 그 아래 각 행에는 라벨 없이 이름만 있다.
   // (3)의 라벨 규칙은 라벨이 이름 바로 앞에 있을 때만 잡으므로 이런 표는
-  // 놓친다 — 대신 "성명" 헤더가 있는 열의 x좌표를 찾아, 그 아래로 같은
-  // x범위에 있는 칸들을 전부 이름 후보로 채택한다.
+  // 놓친다 — 대신 "성명"(또는 "담당자"류 역할 헤더, 아래 참고)이 있는 열의
+  // x좌표를 찾아, 그 아래로 같은 x범위에 있는 칸들을 전부 이름 후보로
+  // 채택한다.
   //
   // PDF 텍스트 조각(item)은 좌표(transform)를 가지고 있어, 표를 만드는 도구
   // (워드프로세서·리포트 라이브러리 대부분)는 각 칸을 별도 조각으로 그린다는
   // 전제 위에서 동작한다 — 한 조각 안에 여러 칸이 합쳐진 표(예: 셀 사이에
   // 탭 문자로만 구분)에는 적용되지 않는다(별도 한계로 남김).
-  const NAME_COLUMN_HEADERS = ["성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자"];
+  const NAME_COLUMN_HEADERS = [
+    "성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자",
+    // 실제 처분요구서((재)예술경영지원센터 계약현황표)로 검증하다 발견: "성명"
+    // 헤더가 아예 없이 "사업담당자"·"계약담당자"·"검수자"처럼 역할 라벨만
+    // 쓰는 표도 실무에 흔하다. 처음엔 (3) 라벨 규칙의 홑낱말(담당자·작성자
+    // 등)을 접미어로 보고 "OO담당자" 전부를 열 헤더로 허용했는데, 같은 검증
+    // 중 다른 실제 문서(보건복지부 종합감사)에서 "시험담당자"가 표 헤더가
+    // 아니라 데이터 칸의 값(담당 인력의 직무 분류)으로 쓰인 경우를 발견해
+    // 오탐이 났다 — 접미어 매칭을 버리고, 실제로 열 헤더로 쓰인 것을 확인한
+    // 낱말만 정확히 나열하는 방식으로 되돌렸다(정밀도 우선).
+    "담당자", "사업담당자", "계약담당자", "검수자",
+    "작성자", "검토자", "확인자", "결재자",
+  ];
+  /** 표 헤더 셀 문구가 이름 열 헤더로 볼 수 있는지 판정 */
+  function isNameColumnHeaderText(cellText) {
+    return NAME_COLUMN_HEADERS.includes(cellText.trim());
+  }
 
   function itemX0(item) { return item.transform[4]; }
   function itemX1(item) { return item.transform[4] + (item.width || 0); }
@@ -1414,7 +1431,16 @@ else if (typeof exports === 'object')
   // 일반 PDF 텍스트(칸마다 이미 조각이 나뉜 경우)에도 안전하게 적용된다 —
   // 같은 이유로 그런 문서에서는 애초에 합쳐질 만큼 좁은 간격이 서로 다른
   // 칸 사이에 나타나지 않는다.
-  const MERGE_GAP_RATIO = 1.0;
+  // 실제 감사보고서(한국문화재재단 처분요구서, "성명" 헤더)로 검증하다
+  // 발견: 한두 글자짜리 헤더 낱말("성명" 등)은 좁은 칸 너비를 시각적으로
+  // 채우려고 글자 사이를 의도적으로 벌려 쓰는 경우(글자 폭 대비 약 1.04배)가
+  // 실제로 있어, 기존 배율(1.0)로는 "성"·"명"이 두 조각으로 남아 헤더를 못
+  // 찾았다(실측: 조각 사이 간격이 글자 높이의 약 1.04배, 같은 문서의 실제
+  // 열-열 간격은 약 2.5배). 그 사이에 안전하게 걸치도록 배율을 1.3으로
+  // 올림 — 실제 열 간격(몇 배)과는 여전히 충분히 떨어져 있어 서로 다른
+  // 칸이 잘못 합쳐질 위험은 늘지 않는다(기존 실제 PDF 샘플 2건·OCR 샘플로
+  // 회귀 검증 완료).
+  const MERGE_GAP_RATIO = 1.3;
   function mergeRowCells(cells) {
     if (cells.length <= 1) return cells;
     const out = [];
@@ -1491,21 +1517,48 @@ else if (typeof exports === 'object')
     return rows;
   }
 
-  /** row 안에서 헤더 셀의 열 구역(zone)—좌우 이웃 헤더와의 중간점—을 계산 */
-  function columnZone(row, headerCell) {
-    const idx = row.cells.indexOf(headerCell);
-    const left = idx > 0 ? (itemX1(row.cells[idx - 1]) + itemX0(headerCell)) / 2 : -Infinity;
-    const right = idx < row.cells.length - 1 ? (itemX1(headerCell) + itemX0(row.cells[idx + 1])) / 2 : Infinity;
+  /** row의 [i0,i1] 구간(헤더가 걸친 칸들)의 열 구역(zone)—좌우 이웃과의 중간점—을 계산 */
+  function columnZoneAt(row, i0, i1) {
+    const left = i0 > 0 ? (itemX1(row.cells[i0 - 1]) + itemX0(row.cells[i0])) / 2 : -Infinity;
+    const right = i1 < row.cells.length - 1 ? (itemX1(row.cells[i1]) + itemX0(row.cells[i1 + 1])) / 2 : Infinity;
     return { left, right };
+  }
+
+  /**
+   * row에서 이름 열 헤더를 전부 찾는다(한 행에 이름 열이 여럿일 수 있음 —
+   * 실측: (재)예술경영지원센터 계약현황표의 "사업담당자·계약담당자·검수자"
+   * 처럼 역할 헤더 3개가 한 행에 나란히 있는 경우, 첫 번째만 찾고 멈추면
+   * 나머지 두 열을 놓친다). 칸 하나가 그대로 일치하는 경우를 먼저 전부
+   * 찾고, 그러고도 안 쓰인 인접한 두 칸을 이어붙인 문구도 확인한다 — "성"
+   * · "명"처럼 짧은 헤더 낱말이 좁은 칸 너비를 시각적으로 채우려고 글자
+   * 사이를 의도적으로 벌려쓴 경우(실측: 한국문화재재단 처분요구서의
+   * "성 명" 헤더, 글자 사이 간격이 mergeRowCells가 한 칸으로 합치는 기준을
+   * 살짝 넘어 두 칸으로 남음)를 위한 보강이다. mergeRowCells 자체를 더
+   * 느슨하게 하면 실제 이름 칸(마스킹 대상)의 글자 오프셋 계산까지 흔들릴
+   * 위험이 있어, 여기 헤더 판정에서만 별도로 처리한다(헤더 칸 자체는
+   * 마스킹 대상이 아니므로 안전).
+   */
+  function findHeaderSpans(row) {
+    const spans = [], used = new Set();
+    for (let i = 0; i < row.cells.length; i++) {
+      if (isNameColumnHeaderText(row.cells[i].str)) { spans.push({ i0: i, i1: i }); used.add(i); }
+    }
+    for (let i = 0; i < row.cells.length - 1; i++) {
+      if (used.has(i) || used.has(i + 1)) continue;
+      const combined = (row.cells[i].str + row.cells[i + 1].str).replace(/\s+/g, "");
+      if (isNameColumnHeaderText(combined)) { spans.push({ i0: i, i1: i + 1 }); used.add(i); used.add(i + 1); }
+    }
+    spans.sort((a, b) => a.i0 - b.i0);
+    return spans;
   }
 
   /** 셀 안에서 맨 앞 한글 2~4글자(이름으로 추정되는 부분)만 추출 */
   function leadingHangulName(item) {
+    if (isNameColumnHeaderText(item.str)) return null; // 다음 표의 헤더를 다시 만난 경우
     const lead = item.str.match(/^\s*/)[0].length;
     const rest = item.str.slice(lead);
     const m = rest.match(/^[가-힣]{2,4}/);
     if (!m) return null;
-    if (NAME_COLUMN_HEADERS.includes(m[0])) return null; // 다음 표의 헤더를 다시 만난 경우
     const start = item._gStart + lead;
     return { start, end: start + m[0].length };
   }
@@ -1519,21 +1572,35 @@ else if (typeof exports === 'object')
     const rows = groupRows(items);
     const out = [];
     for (let hi = 0; hi < rows.length; hi++) {
-      const headerCell = rows[hi].cells.find((c) => NAME_COLUMN_HEADERS.includes(c.str.trim()));
-      if (!headerCell) continue;
-      const zone = columnZone(rows[hi], headerCell);
-      // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
-      // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
-      for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
-        const row = rows[ri];
-        const cell = row.cells.find((c) => {
-          const cx = (itemX0(c) + itemX1(c)) / 2;
-          return cx >= zone.left && cx < zone.right;
-        });
-        if (!cell) break;
-        const name = leadingHangulName(cell);
-        if (!name) break;
-        out.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+      const spans = findHeaderSpans(rows[hi]);
+      for (const span of spans) {
+        const zone = columnZoneAt(rows[hi], span.i0, span.i1);
+        // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
+        // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
+        const hits = [];
+        for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
+          const row = rows[ri];
+          const cell = row.cells.find((c) => {
+            const cx = (itemX0(c) + itemX1(c)) / 2;
+            return cx >= zone.left && cx < zone.right;
+          });
+          if (!cell) break;
+          const name = leadingHangulName(cell);
+          if (!name) break;
+          hits.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+        }
+        // 실제 감사보고서(예술경영지원센터)로 검증하다 발견: 줄바꿈된 본문
+        // 문단에서 그 줄의 마지막 낱말이 우연히 헤더 낱말과 같으면(예:
+        // "…계약에 관한 업무는 계약담당자"로 줄이 끝나는 경우), 그 낱말이
+        // 자기 행의 맨 끝 칸이라 열 구역 오른쪽 경계가 무한대(zone.right ===
+        // Infinity)가 되어버려 다음 줄의 낱말 하나를 이름처럼 잘못 주울 수
+        // 있다(실측: "범위는" 오탐 1건). 그런데 이 조건(오른쪽 경계 무한대)
+        // 이 아닌 정상적인 표(좌우로 다른 열이 있어 경계가 뚜렷한 경우)는
+        // 원래도 결과가 1건뿐인 실제 표가 있어(기존 실제 PDF 샘플 회귀
+        // 테스트로 확인) 여기까지 최소 2건을 요구하면 오히려 놓친다 —
+        // 그래서 오른쪽 경계가 무한대인 경우에만(그 문단 우연의 일치일
+        // 위험이 있는 경우에만) 최소 2건을 요구한다.
+        if (hits.length >= 2 || zone.right !== Infinity) out.push(...hits);
       }
     }
     return out;
