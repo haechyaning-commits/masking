@@ -48,6 +48,7 @@
         <label class="chk"><input type="checkbox" id="nameLabelRule" checked /> <span>성명 라벨 자동 (「성명:」·「작성자」 등 라벨 바로 뒤 이름 자동 탐지)</span></label>
         <label class="chk"><input type="checkbox" id="tableColumnRule" checked /> <span>표 열 구조 자동 (「성명」 등 열 헤더를 찾아 그 아래 칸을 전부 이름으로 탐지 — 명단 표에 효과적)</span></label>
         <label class="chk"><input type="checkbox" id="nameDictRule" /> <span>이름 사전 자동탐지 <b>(베타)</b> — 흔한 성씨로 시작하는 낱말을 이름으로 추정. 라벨 없이 사전만 보고 판단해 오탐이 있을 수 있으니, 켠 뒤 검토 화면에서 꼭 확인하세요.</span></label>
+        <label class="chk"><input type="checkbox" id="nameStatRule" /> <span>이름 통계 모델 자동탐지 <b>(베타)</b> — 성 뒤 두 글자가 실제 이름 음절 조합으로 얼마나 그럴듯한지 통계적으로 채점. 문맥·품사를 이해하는 정식 NER은 아니며, 학습 표본에 없는 드문 이름은 놓칠 수 있으니 켠 뒤 검토 화면에서 확인하세요.</span></label>
         <div class="symrow">
           <span class="muted">마스킹 문자 <small>(번호류 전용 — 이름·직접지정은 사람마다 다른 기호가 자동 배정됩니다)</small></span>
           <div class="syms" id="symPicker">

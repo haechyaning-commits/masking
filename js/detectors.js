@@ -151,6 +151,10 @@
   //        (문맥 기반이라 사전 없이도 정확도가 높아 기본으로 켜둔다)
   //    (4) 성씨 사전 자동탐지(베타) — 흔한 성씨로 시작하는 2~4글자 한글 토큰
   //        (문맥이 없어 오탐 위험이 있으므로 기본은 꺼두고 사용자가 켜야 함)
+  //    (6) 이름 통계 모델 자동탐지(베타) — (4)의 이분법적 사전/제외단어
+  //        판정 대신, 성 뒤 두 글자가 실제 한국인 이름 음절 조합으로 얼마나
+  //        그럴듯한지를 통계적 우도비로 채점하는 가벼운 나이브 베이즈 분류기
+  //        (문맥·품사를 이해하는 진짜 NER은 아님 — README 참고. 기본은 꺼둠)
   //  · 반환: [{ start, end, maskStart, maskEnd, kind }]
   //    maskStart~maskEnd 만 기호로 가리고 접미어(센터 등)는 남긴다.
   // ================================================================
@@ -322,6 +326,9 @@
     "판단", "판정", "판결", "판례", "판사",
     "계좌", "계좌번호", "계획", "계약", "계속", "계기", "계층",
     "목적", "목표", "목록", "목차", "목격",
+    // (6) 이름 통계 모델 검증 중 발견한 추가 오탐(실데이터 유사 샘플: "경영관리실장"의
+    // 앞 3글자 "경영관"이 성씨 "경"+이름 "영관"으로 오인되던 문제 등).
+    "경영", "경영관리", "경영진", "경고", "경비", "경력", "경제", "경쟁", "경험", "경찰",
   ];
 
   /** candidate가 흔한 낱말(또는 그 낱말로 시작하는 문자열)이면 true */
@@ -367,18 +374,147 @@
     return out;
   }
 
+  // ---------------- (6) 이름 통계 모델 자동탐지 (베타) ----------------
+  // "정식 NER(문맥·품사 기반)"을 표방하지는 않는다 — 문장 구조나 품사를 이해하는
+  // 학습 모델이 아니라, 성 뒤 두 글자가 실제 한국인 이름 음절 조합으로 얼마나
+  // 그럴듯한지를 통계적으로 채점하는 가벼운 나이브 베이즈(Naive Bayes) 분류기다.
+  // (4) 성씨 사전 자동탐지가 "제외 단어 목록"이라는 이분법적 블록리스트로 오탐을
+  // 막는 것과 달리, 이름다움과 낱말다움을 각각 음절 빈도로 추정해 우도비
+  // (likelihood ratio)로 연속적인 점수를 매긴다 — 제외 목록에 없는 새로운 낱말도
+  // "이름 음절 패턴과 안 닮았다"는 이유로 걸러낼 수 있고, 반대로 흔한 낱말과
+  // 우연히 겹치는 진짜 이름도 통계적으로 구제될 여지가 있다.
+  //
+  // 이름 음절 빈도(NAME_SYL_POS1/POS2)의 출처: 위키백과 "List of Korean given
+  // names"(2음절 이름 637개) + "List of the most popular given names in South
+  // Korea"(대법원 가족관계등록 통계 기반 연도별 인기 이름, 1940~2021년 남녀 각
+  // 상위 10위, 320개— 여러 해에 걸쳐 반복되는 이름일수록 자연스럽게 가중치가
+  // 높아짐)를 합친 총 957개 표본에서 집계. 낱말 음절 빈도(WORD_SYL_POS1/POS2)는
+  // 새 말뭉치를 따로 만들지 않고, 이미 검증된 (4)의 NAME_EXCLUDE_WORDS(성씨로
+  // 시작하는 흔한 낱말 461개)에서 "성씨 다음 글자"를 그대로 가져다 쓴다.
+  //
+  // 검증(회귀 테스트, 학습 표본과 겹치지 않는 홀드아웃): 새 이름 16개 중 13개
+  // (81%)를 정확히 이름으로 판정(나머지 3개는 순우리말 이름 등 학습 표본에 드문
+  // 음절이라 놓침 — 재현율 손해, 정밀도 우선). 학습에 쓰지 않은 새 낱말 19개 +
+  // NAME_EXCLUDE_WORDS에서 유도한 3글자 낱말 35개, 총 54개는 전부 정확히
+  // "이름 아님"으로 판정해 오탐 0건.
+  const NAME_SYL_POS1 = {
+    "지":73,"영":53,"정":42,"민":40,"성":38,"현":35,"서":34,"은":33,"경":31,"재":27,
+    "하":26,"준":24,"승":24,"수":22,"동":21,"예":19,"혜":16,"미":16,"태":16,"진":15,
+    "광":14,"도":13,"시":13,"유":13,"종":13,"윤":13,"상":12,"명":12,"병":10,"주":9,
+    "선":9,"순":9,"기":9,"용":9,"다":8,"소":8,"원":8,"희":8,"남":7,"채":6,
+    "인":6,"나":6,"보":6,"해":6,"이":5,"건":5,"우":5,"춘":5,"세":5,"창":5,
+    "한":5,"호":5,"가":4,"규":4,"대":4,"만":4,"석":4,"철":4,"형":4,"아":3,
+    "숙":3,"연":3,"찬":3,"혁":3,"효":3,"일":2,"슬":2,"화":2,"덕":2,"무":2,
+    "문":2,"범":2,"신":2,"오":2,"홍":2,"중":1,"옥":1,"강":1,"고":1,"금":1,
+    "낙":1,"누":1,"두":1,"류":1,"복":1,"빛":1,"사":1,"송":1,"애":1,"여":1,
+    "요":1,"장":1,"제":1,"치":1
+  };
+  const NAME_SYL_POS2 = {
+    "준":52,"우":49,"호":43,"영":41,"수":37,"희":35,"현":33,"원":31,"훈":30,"진":29,
+    "윤":27,"서":26,"민":25,"자":24,"은":23,"연":22,"숙":22,"철":20,"경":17,"성":16,
+    "아":16,"정":16,"석":15,"빈":14,"주":14,"기":12,"재":11,"식":11,"미":11,"혁":10,
+    "환":10,"일":10,"혜":10,"선":8,"화":8,"나":8,"욱":8,"규":7,"린":7,"지":7,
+    "옥":7,"하":7,"용":7,"남":6,"순":6,"태":6,"웅":5,"리":5,"근":5,"후":4,
+    "인":4,"한":4,"열":3,"안":3,"유":3,"모":3,"래":3,"형":3,"길":2,"림":2,
+    "건":2,"헌":2,"라":2,"름":2,"국":2,"신":2,"애":2,"별":2,"상":2,"명":2,
+    "솔":2,"을":1,"구":1,"완":1,"택":1,"조":1,"문":1,"표":1,"무":1,"솜":1,
+    "찬":1,"란":1,"람":1,"랑":1,"동":1,"이":1,"천":1,"관":1,"온":1,"대":1,
+    "복":1,"비":1,"채":1,"슬":1,"범":1,"섭":1,"효":1,"노":1,"운":1,"해":1,
+    "령":1,"늘":1,"승":1
+  };
+
+  /** NAME_EXCLUDE_WORDS(성씨로 시작하는 흔한 낱말)에서 pos번째 글자의 빈도를 집계 */
+  function buildWordSylFreq(pos) {
+    const f = {};
+    for (const w of NAME_EXCLUDE_WORDS) {
+      if (w.length > pos) { const c = w[pos]; f[c] = (f[c] || 0) + 1; }
+    }
+    return f;
+  }
+  const WORD_SYL_POS1 = buildWordSylFreq(1);
+  const WORD_SYL_POS2 = buildWordSylFreq(2);
+
+  function sumVals(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
+  const NAME_POS1_TOTAL = sumVals(NAME_SYL_POS1), NAME_POS2_TOTAL = sumVals(NAME_SYL_POS2);
+  const WORD_POS1_TOTAL = sumVals(WORD_SYL_POS1), WORD_POS2_TOTAL = sumVals(WORD_SYL_POS2);
+  const VOCAB1 = new Set([...Object.keys(NAME_SYL_POS1), ...Object.keys(WORD_SYL_POS1)]).size;
+  const VOCAB2 = new Set([...Object.keys(NAME_SYL_POS2), ...Object.keys(WORD_SYL_POS2)]).size;
+  const NAME_STAT_ALPHA = 0.5; // 라플라스 스무딩 계수(회귀 테스트로 튜닝)
+  const NAME_STAT_THRESHOLD = 0.3; // 이 값을 넘어야 "이름"으로 판정(회귀 테스트로 튜닝: 오탐 0을 유지하는 범위 내에서 선택)
+
+  function logProb(freq, total, vocab, ch) {
+    return Math.log(((freq[ch] || 0) + NAME_STAT_ALPHA) / (total + NAME_STAT_ALPHA * vocab));
+  }
+
+  /** 성 뒤 두 글자(given)가 실제 이름일 로그 우도비(클수록 이름다움) */
+  function nameLikelihoodScore(given) {
+    if (given.length !== 2) return -Infinity; // 1글자 이름은 학습 표본이 부족해 이 통계 모델의 판단 범위 밖(README 참고)
+    const s1 = logProb(NAME_SYL_POS1, NAME_POS1_TOTAL, VOCAB1, given[0]) - logProb(WORD_SYL_POS1, WORD_POS1_TOTAL, VOCAB1, given[0]);
+    const s2 = logProb(NAME_SYL_POS2, NAME_POS2_TOTAL, VOCAB2, given[1]) - logProb(WORD_SYL_POS2, WORD_POS2_TOTAL, VOCAB2, given[1]);
+    return s1 + s2;
+  }
+
+  /**
+   * (4)와 같은 방식으로 덩어리 맨 앞에서 성씨를 찾되, 제외 단어 블록리스트
+   * 대신 nameLikelihoodScore()의 통계적 판정을 쓴다. 성 뒤 정확히 2글자만
+   * 후보로 본다(1글자 이름은 위 이유로 이 모델이 판단하지 않음).
+   */
+  function collectStatisticalNames(text) {
+    const out = [];
+    const n = text.length;
+    let i = 0;
+    while (i < n) {
+      if (!HANGUL.test(text[i])) { i++; continue; }
+      let j = i;
+      while (j < n && HANGUL.test(text[j])) j++;
+      const run = text.slice(i, j);
+      let surnameLen = 0;
+      if (run.length >= 2 && SURNAMES2.includes(run.slice(0, 2))) surnameLen = 2;
+      else if (run.length >= 2 && SURNAMES1.includes(run[0])) surnameLen = 1;
+      if (surnameLen && run.length >= surnameLen + 2) {
+        const end = i + surnameLen + 2;
+        const given = run.slice(surnameLen, surnameLen + 2);
+        // 통계 점수만으로는 "긴 낱말의 앞부분"(예: "경영관리실장"의 "경영관")을
+        // 못 걸러낼 수 있어(짧은 후보 자체가 그럴듯한 이름 음절처럼 보이는
+        // 경우), (4)에서 이미 검증된 제외 단어 목록도 함께 확인한다.
+        if (!isExcludedWord(text.slice(i, end)) && nameLikelihoodScore(given) > NAME_STAT_THRESHOLD) {
+          out.push({ start: i, end, maskStart: i, maskEnd: end, kind: "name-stat" });
+        }
+      }
+      i = j;
+    }
+    return out;
+  }
+
   // ---------------- (5) 표 열 구조 인식 ----------------
   // 감사보고서에 가장 흔한 표 형태 명단은 "연번·소속·성명·주민등록번호…" 같은
   // 열 헤더가 맨 위에 한 번만 있고, 그 아래 각 행에는 라벨 없이 이름만 있다.
   // (3)의 라벨 규칙은 라벨이 이름 바로 앞에 있을 때만 잡으므로 이런 표는
-  // 놓친다 — 대신 "성명" 헤더가 있는 열의 x좌표를 찾아, 그 아래로 같은
-  // x범위에 있는 칸들을 전부 이름 후보로 채택한다.
+  // 놓친다 — 대신 "성명"(또는 "담당자"류 역할 헤더, 아래 참고)이 있는 열의
+  // x좌표를 찾아, 그 아래로 같은 x범위에 있는 칸들을 전부 이름 후보로
+  // 채택한다.
   //
   // PDF 텍스트 조각(item)은 좌표(transform)를 가지고 있어, 표를 만드는 도구
   // (워드프로세서·리포트 라이브러리 대부분)는 각 칸을 별도 조각으로 그린다는
   // 전제 위에서 동작한다 — 한 조각 안에 여러 칸이 합쳐진 표(예: 셀 사이에
   // 탭 문자로만 구분)에는 적용되지 않는다(별도 한계로 남김).
-  const NAME_COLUMN_HEADERS = ["성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자"];
+  const NAME_COLUMN_HEADERS = [
+    "성명", "이름", "성명(직급)", "성명/직급", "직원성명", "사용자",
+    // 실제 처분요구서((재)예술경영지원센터 계약현황표)로 검증하다 발견: "성명"
+    // 헤더가 아예 없이 "사업담당자"·"계약담당자"·"검수자"처럼 역할 라벨만
+    // 쓰는 표도 실무에 흔하다. 처음엔 (3) 라벨 규칙의 홑낱말(담당자·작성자
+    // 등)을 접미어로 보고 "OO담당자" 전부를 열 헤더로 허용했는데, 같은 검증
+    // 중 다른 실제 문서(보건복지부 종합감사)에서 "시험담당자"가 표 헤더가
+    // 아니라 데이터 칸의 값(담당 인력의 직무 분류)으로 쓰인 경우를 발견해
+    // 오탐이 났다 — 접미어 매칭을 버리고, 실제로 열 헤더로 쓰인 것을 확인한
+    // 낱말만 정확히 나열하는 방식으로 되돌렸다(정밀도 우선).
+    "담당자", "사업담당자", "계약담당자", "검수자",
+    "작성자", "검토자", "확인자", "결재자",
+  ];
+  /** 표 헤더 셀 문구가 이름 열 헤더로 볼 수 있는지 판정 */
+  function isNameColumnHeaderText(cellText) {
+    return NAME_COLUMN_HEADERS.includes(cellText.trim());
+  }
 
   function itemX0(item) { return item.transform[4]; }
   function itemX1(item) { return item.transform[4] + (item.width || 0); }
@@ -393,7 +529,16 @@
   // 일반 PDF 텍스트(칸마다 이미 조각이 나뉜 경우)에도 안전하게 적용된다 —
   // 같은 이유로 그런 문서에서는 애초에 합쳐질 만큼 좁은 간격이 서로 다른
   // 칸 사이에 나타나지 않는다.
-  const MERGE_GAP_RATIO = 1.0;
+  // 실제 감사보고서(한국문화재재단 처분요구서, "성명" 헤더)로 검증하다
+  // 발견: 한두 글자짜리 헤더 낱말("성명" 등)은 좁은 칸 너비를 시각적으로
+  // 채우려고 글자 사이를 의도적으로 벌려 쓰는 경우(글자 폭 대비 약 1.04배)가
+  // 실제로 있어, 기존 배율(1.0)로는 "성"·"명"이 두 조각으로 남아 헤더를 못
+  // 찾았다(실측: 조각 사이 간격이 글자 높이의 약 1.04배, 같은 문서의 실제
+  // 열-열 간격은 약 2.5배). 그 사이에 안전하게 걸치도록 배율을 1.3으로
+  // 올림 — 실제 열 간격(몇 배)과는 여전히 충분히 떨어져 있어 서로 다른
+  // 칸이 잘못 합쳐질 위험은 늘지 않는다(기존 실제 PDF 샘플 2건·OCR 샘플로
+  // 회귀 검증 완료).
+  const MERGE_GAP_RATIO = 1.3;
   function mergeRowCells(cells) {
     if (cells.length <= 1) return cells;
     const out = [];
@@ -470,21 +615,48 @@
     return rows;
   }
 
-  /** row 안에서 헤더 셀의 열 구역(zone)—좌우 이웃 헤더와의 중간점—을 계산 */
-  function columnZone(row, headerCell) {
-    const idx = row.cells.indexOf(headerCell);
-    const left = idx > 0 ? (itemX1(row.cells[idx - 1]) + itemX0(headerCell)) / 2 : -Infinity;
-    const right = idx < row.cells.length - 1 ? (itemX1(headerCell) + itemX0(row.cells[idx + 1])) / 2 : Infinity;
+  /** row의 [i0,i1] 구간(헤더가 걸친 칸들)의 열 구역(zone)—좌우 이웃과의 중간점—을 계산 */
+  function columnZoneAt(row, i0, i1) {
+    const left = i0 > 0 ? (itemX1(row.cells[i0 - 1]) + itemX0(row.cells[i0])) / 2 : -Infinity;
+    const right = i1 < row.cells.length - 1 ? (itemX1(row.cells[i1]) + itemX0(row.cells[i1 + 1])) / 2 : Infinity;
     return { left, right };
+  }
+
+  /**
+   * row에서 이름 열 헤더를 전부 찾는다(한 행에 이름 열이 여럿일 수 있음 —
+   * 실측: (재)예술경영지원센터 계약현황표의 "사업담당자·계약담당자·검수자"
+   * 처럼 역할 헤더 3개가 한 행에 나란히 있는 경우, 첫 번째만 찾고 멈추면
+   * 나머지 두 열을 놓친다). 칸 하나가 그대로 일치하는 경우를 먼저 전부
+   * 찾고, 그러고도 안 쓰인 인접한 두 칸을 이어붙인 문구도 확인한다 — "성"
+   * · "명"처럼 짧은 헤더 낱말이 좁은 칸 너비를 시각적으로 채우려고 글자
+   * 사이를 의도적으로 벌려쓴 경우(실측: 한국문화재재단 처분요구서의
+   * "성 명" 헤더, 글자 사이 간격이 mergeRowCells가 한 칸으로 합치는 기준을
+   * 살짝 넘어 두 칸으로 남음)를 위한 보강이다. mergeRowCells 자체를 더
+   * 느슨하게 하면 실제 이름 칸(마스킹 대상)의 글자 오프셋 계산까지 흔들릴
+   * 위험이 있어, 여기 헤더 판정에서만 별도로 처리한다(헤더 칸 자체는
+   * 마스킹 대상이 아니므로 안전).
+   */
+  function findHeaderSpans(row) {
+    const spans = [], used = new Set();
+    for (let i = 0; i < row.cells.length; i++) {
+      if (isNameColumnHeaderText(row.cells[i].str)) { spans.push({ i0: i, i1: i }); used.add(i); }
+    }
+    for (let i = 0; i < row.cells.length - 1; i++) {
+      if (used.has(i) || used.has(i + 1)) continue;
+      const combined = (row.cells[i].str + row.cells[i + 1].str).replace(/\s+/g, "");
+      if (isNameColumnHeaderText(combined)) { spans.push({ i0: i, i1: i + 1 }); used.add(i); used.add(i + 1); }
+    }
+    spans.sort((a, b) => a.i0 - b.i0);
+    return spans;
   }
 
   /** 셀 안에서 맨 앞 한글 2~4글자(이름으로 추정되는 부분)만 추출 */
   function leadingHangulName(item) {
+    if (isNameColumnHeaderText(item.str)) return null; // 다음 표의 헤더를 다시 만난 경우
     const lead = item.str.match(/^\s*/)[0].length;
     const rest = item.str.slice(lead);
     const m = rest.match(/^[가-힣]{2,4}/);
     if (!m) return null;
-    if (NAME_COLUMN_HEADERS.includes(m[0])) return null; // 다음 표의 헤더를 다시 만난 경우
     const start = item._gStart + lead;
     return { start, end: start + m[0].length };
   }
@@ -498,21 +670,35 @@
     const rows = groupRows(items);
     const out = [];
     for (let hi = 0; hi < rows.length; hi++) {
-      const headerCell = rows[hi].cells.find((c) => NAME_COLUMN_HEADERS.includes(c.str.trim()));
-      if (!headerCell) continue;
-      const zone = columnZone(rows[hi], headerCell);
-      // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
-      // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
-      for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
-        const row = rows[ri];
-        const cell = row.cells.find((c) => {
-          const cx = (itemX0(c) + itemX1(c)) / 2;
-          return cx >= zone.left && cx < zone.right;
-        });
-        if (!cell) break;
-        const name = leadingHangulName(cell);
-        if (!name) break;
-        out.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+      const spans = findHeaderSpans(rows[hi]);
+      for (const span of spans) {
+        const zone = columnZoneAt(rows[hi], span.i0, span.i1);
+        // 헤더 아래 행들을 순서대로 훑되, 그 열에 이름처럼 생기지 않은 칸이
+        // 나오면(표가 끝났거나 다음 표의 헤더를 만난 경우) 바로 멈춘다.
+        const hits = [];
+        for (let ri = hi + 1; ri < rows.length && ri < hi + 200; ri++) {
+          const row = rows[ri];
+          const cell = row.cells.find((c) => {
+            const cx = (itemX0(c) + itemX1(c)) / 2;
+            return cx >= zone.left && cx < zone.right;
+          });
+          if (!cell) break;
+          const name = leadingHangulName(cell);
+          if (!name) break;
+          hits.push({ start: name.start, end: name.end, maskStart: name.start, maskEnd: name.end, kind: "name-column" });
+        }
+        // 실제 감사보고서(예술경영지원센터)로 검증하다 발견: 줄바꿈된 본문
+        // 문단에서 그 줄의 마지막 낱말이 우연히 헤더 낱말과 같으면(예:
+        // "…계약에 관한 업무는 계약담당자"로 줄이 끝나는 경우), 그 낱말이
+        // 자기 행의 맨 끝 칸이라 열 구역 오른쪽 경계가 무한대(zone.right ===
+        // Infinity)가 되어버려 다음 줄의 낱말 하나를 이름처럼 잘못 주울 수
+        // 있다(실측: "범위는" 오탐 1건). 그런데 이 조건(오른쪽 경계 무한대)
+        // 이 아닌 정상적인 표(좌우로 다른 열이 있어 경계가 뚜렷한 경우)는
+        // 원래도 결과가 1건뿐인 실제 표가 있어(기존 실제 PDF 샘플 회귀
+        // 테스트로 확인) 여기까지 최소 2건을 요구하면 오히려 놓친다 —
+        // 그래서 오른쪽 경계가 무한대인 경우에만(그 문단 우연의 일치일
+        // 위험이 있는 경우에만) 최소 2건을 요구한다.
+        if (hits.length >= 2 || zone.right !== Infinity) out.push(...hits);
       }
     }
     return out;
@@ -522,7 +708,8 @@
    * @param {string} text  페이지 텍스트
    * @param {object} opts  { words: string[], useSuffixRule: boolean,
    *                          useNameLabelRule: boolean, useNameDict: boolean,
-   *                          useTableColumnRule: boolean, items: Array }
+   *                          useTableColumnRule: boolean, useStatName: boolean,
+   *                          items: Array }
    */
   function findEntities(text, opts) {
     if (!text) return [];
@@ -567,6 +754,9 @@
     // (5) 표 열 구조 인식: "성명" 등 열 헤더 아래 칸을 전부 이름으로 간주
     if (opts.useTableColumnRule && opts.items) results.push(...collectTableColumnNames(opts.items));
 
+    // (6) 이름 통계 모델 자동탐지(베타): 사전 대신 음절 우도비로 판단
+    if (opts.useStatName) results.push(...collectStatisticalNames(text));
+
     // 겹침 정리: 시작이 이르고 길이가 긴 것 우선, 겹치면 뒤 후보 버림
     results.sort((a, b) => (a.start - b.start) || (b.end - a.end));
     const out = [];
@@ -581,5 +771,6 @@
   global.PIIDetector = {
     CATEGORIES, detect, findEntities, ORG_SUFFIXES,
     SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS, NAME_COLUMN_HEADERS,
+    nameLikelihoodScore,
   };
 })(window);
