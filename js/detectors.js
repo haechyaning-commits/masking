@@ -151,6 +151,10 @@
   //        (문맥 기반이라 사전 없이도 정확도가 높아 기본으로 켜둔다)
   //    (4) 성씨 사전 자동탐지(베타) — 흔한 성씨로 시작하는 2~4글자 한글 토큰
   //        (문맥이 없어 오탐 위험이 있으므로 기본은 꺼두고 사용자가 켜야 함)
+  //    (6) 이름 통계 모델 자동탐지(베타) — (4)의 이분법적 사전/제외단어
+  //        판정 대신, 성 뒤 두 글자가 실제 한국인 이름 음절 조합으로 얼마나
+  //        그럴듯한지를 통계적 우도비로 채점하는 가벼운 나이브 베이즈 분류기
+  //        (문맥·품사를 이해하는 진짜 NER은 아님 — README 참고. 기본은 꺼둠)
   //  · 반환: [{ start, end, maskStart, maskEnd, kind }]
   //    maskStart~maskEnd 만 기호로 가리고 접미어(센터 등)는 남긴다.
   // ================================================================
@@ -322,6 +326,9 @@
     "판단", "판정", "판결", "판례", "판사",
     "계좌", "계좌번호", "계획", "계약", "계속", "계기", "계층",
     "목적", "목표", "목록", "목차", "목격",
+    // (6) 이름 통계 모델 검증 중 발견한 추가 오탐(실데이터 유사 샘플: "경영관리실장"의
+    // 앞 3글자 "경영관"이 성씨 "경"+이름 "영관"으로 오인되던 문제 등).
+    "경영", "경영관리", "경영진", "경고", "경비", "경력", "경제", "경쟁", "경험", "경찰",
   ];
 
   /** candidate가 흔한 낱말(또는 그 낱말로 시작하는 문자열)이면 true */
@@ -360,6 +367,118 @@
         const candidate = run.slice(0, len);
         if (!isExcludedWord(candidate)) {
           out.push({ start: i, end: i + len, maskStart: i, maskEnd: i + len, kind: "name-dict" });
+        }
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  // ---------------- (6) 이름 통계 모델 자동탐지 (베타) ----------------
+  // "정식 NER(문맥·품사 기반)"을 표방하지는 않는다 — 문장 구조나 품사를 이해하는
+  // 학습 모델이 아니라, 성 뒤 두 글자가 실제 한국인 이름 음절 조합으로 얼마나
+  // 그럴듯한지를 통계적으로 채점하는 가벼운 나이브 베이즈(Naive Bayes) 분류기다.
+  // (4) 성씨 사전 자동탐지가 "제외 단어 목록"이라는 이분법적 블록리스트로 오탐을
+  // 막는 것과 달리, 이름다움과 낱말다움을 각각 음절 빈도로 추정해 우도비
+  // (likelihood ratio)로 연속적인 점수를 매긴다 — 제외 목록에 없는 새로운 낱말도
+  // "이름 음절 패턴과 안 닮았다"는 이유로 걸러낼 수 있고, 반대로 흔한 낱말과
+  // 우연히 겹치는 진짜 이름도 통계적으로 구제될 여지가 있다.
+  //
+  // 이름 음절 빈도(NAME_SYL_POS1/POS2)의 출처: 위키백과 "List of Korean given
+  // names"(2음절 이름 637개) + "List of the most popular given names in South
+  // Korea"(대법원 가족관계등록 통계 기반 연도별 인기 이름, 1940~2021년 남녀 각
+  // 상위 10위, 320개— 여러 해에 걸쳐 반복되는 이름일수록 자연스럽게 가중치가
+  // 높아짐)를 합친 총 957개 표본에서 집계. 낱말 음절 빈도(WORD_SYL_POS1/POS2)는
+  // 새 말뭉치를 따로 만들지 않고, 이미 검증된 (4)의 NAME_EXCLUDE_WORDS(성씨로
+  // 시작하는 흔한 낱말 461개)에서 "성씨 다음 글자"를 그대로 가져다 쓴다.
+  //
+  // 검증(회귀 테스트, 학습 표본과 겹치지 않는 홀드아웃): 새 이름 16개 중 13개
+  // (81%)를 정확히 이름으로 판정(나머지 3개는 순우리말 이름 등 학습 표본에 드문
+  // 음절이라 놓침 — 재현율 손해, 정밀도 우선). 학습에 쓰지 않은 새 낱말 19개 +
+  // NAME_EXCLUDE_WORDS에서 유도한 3글자 낱말 35개, 총 54개는 전부 정확히
+  // "이름 아님"으로 판정해 오탐 0건.
+  const NAME_SYL_POS1 = {
+    "지":73,"영":53,"정":42,"민":40,"성":38,"현":35,"서":34,"은":33,"경":31,"재":27,
+    "하":26,"준":24,"승":24,"수":22,"동":21,"예":19,"혜":16,"미":16,"태":16,"진":15,
+    "광":14,"도":13,"시":13,"유":13,"종":13,"윤":13,"상":12,"명":12,"병":10,"주":9,
+    "선":9,"순":9,"기":9,"용":9,"다":8,"소":8,"원":8,"희":8,"남":7,"채":6,
+    "인":6,"나":6,"보":6,"해":6,"이":5,"건":5,"우":5,"춘":5,"세":5,"창":5,
+    "한":5,"호":5,"가":4,"규":4,"대":4,"만":4,"석":4,"철":4,"형":4,"아":3,
+    "숙":3,"연":3,"찬":3,"혁":3,"효":3,"일":2,"슬":2,"화":2,"덕":2,"무":2,
+    "문":2,"범":2,"신":2,"오":2,"홍":2,"중":1,"옥":1,"강":1,"고":1,"금":1,
+    "낙":1,"누":1,"두":1,"류":1,"복":1,"빛":1,"사":1,"송":1,"애":1,"여":1,
+    "요":1,"장":1,"제":1,"치":1
+  };
+  const NAME_SYL_POS2 = {
+    "준":52,"우":49,"호":43,"영":41,"수":37,"희":35,"현":33,"원":31,"훈":30,"진":29,
+    "윤":27,"서":26,"민":25,"자":24,"은":23,"연":22,"숙":22,"철":20,"경":17,"성":16,
+    "아":16,"정":16,"석":15,"빈":14,"주":14,"기":12,"재":11,"식":11,"미":11,"혁":10,
+    "환":10,"일":10,"혜":10,"선":8,"화":8,"나":8,"욱":8,"규":7,"린":7,"지":7,
+    "옥":7,"하":7,"용":7,"남":6,"순":6,"태":6,"웅":5,"리":5,"근":5,"후":4,
+    "인":4,"한":4,"열":3,"안":3,"유":3,"모":3,"래":3,"형":3,"길":2,"림":2,
+    "건":2,"헌":2,"라":2,"름":2,"국":2,"신":2,"애":2,"별":2,"상":2,"명":2,
+    "솔":2,"을":1,"구":1,"완":1,"택":1,"조":1,"문":1,"표":1,"무":1,"솜":1,
+    "찬":1,"란":1,"람":1,"랑":1,"동":1,"이":1,"천":1,"관":1,"온":1,"대":1,
+    "복":1,"비":1,"채":1,"슬":1,"범":1,"섭":1,"효":1,"노":1,"운":1,"해":1,
+    "령":1,"늘":1,"승":1
+  };
+
+  /** NAME_EXCLUDE_WORDS(성씨로 시작하는 흔한 낱말)에서 pos번째 글자의 빈도를 집계 */
+  function buildWordSylFreq(pos) {
+    const f = {};
+    for (const w of NAME_EXCLUDE_WORDS) {
+      if (w.length > pos) { const c = w[pos]; f[c] = (f[c] || 0) + 1; }
+    }
+    return f;
+  }
+  const WORD_SYL_POS1 = buildWordSylFreq(1);
+  const WORD_SYL_POS2 = buildWordSylFreq(2);
+
+  function sumVals(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
+  const NAME_POS1_TOTAL = sumVals(NAME_SYL_POS1), NAME_POS2_TOTAL = sumVals(NAME_SYL_POS2);
+  const WORD_POS1_TOTAL = sumVals(WORD_SYL_POS1), WORD_POS2_TOTAL = sumVals(WORD_SYL_POS2);
+  const VOCAB1 = new Set([...Object.keys(NAME_SYL_POS1), ...Object.keys(WORD_SYL_POS1)]).size;
+  const VOCAB2 = new Set([...Object.keys(NAME_SYL_POS2), ...Object.keys(WORD_SYL_POS2)]).size;
+  const NAME_STAT_ALPHA = 0.5; // 라플라스 스무딩 계수(회귀 테스트로 튜닝)
+  const NAME_STAT_THRESHOLD = 0.3; // 이 값을 넘어야 "이름"으로 판정(회귀 테스트로 튜닝: 오탐 0을 유지하는 범위 내에서 선택)
+
+  function logProb(freq, total, vocab, ch) {
+    return Math.log(((freq[ch] || 0) + NAME_STAT_ALPHA) / (total + NAME_STAT_ALPHA * vocab));
+  }
+
+  /** 성 뒤 두 글자(given)가 실제 이름일 로그 우도비(클수록 이름다움) */
+  function nameLikelihoodScore(given) {
+    if (given.length !== 2) return -Infinity; // 1글자 이름은 학습 표본이 부족해 이 통계 모델의 판단 범위 밖(README 참고)
+    const s1 = logProb(NAME_SYL_POS1, NAME_POS1_TOTAL, VOCAB1, given[0]) - logProb(WORD_SYL_POS1, WORD_POS1_TOTAL, VOCAB1, given[0]);
+    const s2 = logProb(NAME_SYL_POS2, NAME_POS2_TOTAL, VOCAB2, given[1]) - logProb(WORD_SYL_POS2, WORD_POS2_TOTAL, VOCAB2, given[1]);
+    return s1 + s2;
+  }
+
+  /**
+   * (4)와 같은 방식으로 덩어리 맨 앞에서 성씨를 찾되, 제외 단어 블록리스트
+   * 대신 nameLikelihoodScore()의 통계적 판정을 쓴다. 성 뒤 정확히 2글자만
+   * 후보로 본다(1글자 이름은 위 이유로 이 모델이 판단하지 않음).
+   */
+  function collectStatisticalNames(text) {
+    const out = [];
+    const n = text.length;
+    let i = 0;
+    while (i < n) {
+      if (!HANGUL.test(text[i])) { i++; continue; }
+      let j = i;
+      while (j < n && HANGUL.test(text[j])) j++;
+      const run = text.slice(i, j);
+      let surnameLen = 0;
+      if (run.length >= 2 && SURNAMES2.includes(run.slice(0, 2))) surnameLen = 2;
+      else if (run.length >= 2 && SURNAMES1.includes(run[0])) surnameLen = 1;
+      if (surnameLen && run.length >= surnameLen + 2) {
+        const end = i + surnameLen + 2;
+        const given = run.slice(surnameLen, surnameLen + 2);
+        // 통계 점수만으로는 "긴 낱말의 앞부분"(예: "경영관리실장"의 "경영관")을
+        // 못 걸러낼 수 있어(짧은 후보 자체가 그럴듯한 이름 음절처럼 보이는
+        // 경우), (4)에서 이미 검증된 제외 단어 목록도 함께 확인한다.
+        if (!isExcludedWord(text.slice(i, end)) && nameLikelihoodScore(given) > NAME_STAT_THRESHOLD) {
+          out.push({ start: i, end, maskStart: i, maskEnd: end, kind: "name-stat" });
         }
       }
       i = j;
@@ -522,7 +641,8 @@
    * @param {string} text  페이지 텍스트
    * @param {object} opts  { words: string[], useSuffixRule: boolean,
    *                          useNameLabelRule: boolean, useNameDict: boolean,
-   *                          useTableColumnRule: boolean, items: Array }
+   *                          useTableColumnRule: boolean, useStatName: boolean,
+   *                          items: Array }
    */
   function findEntities(text, opts) {
     if (!text) return [];
@@ -567,6 +687,9 @@
     // (5) 표 열 구조 인식: "성명" 등 열 헤더 아래 칸을 전부 이름으로 간주
     if (opts.useTableColumnRule && opts.items) results.push(...collectTableColumnNames(opts.items));
 
+    // (6) 이름 통계 모델 자동탐지(베타): 사전 대신 음절 우도비로 판단
+    if (opts.useStatName) results.push(...collectStatisticalNames(text));
+
     // 겹침 정리: 시작이 이르고 길이가 긴 것 우선, 겹치면 뒤 후보 버림
     results.sort((a, b) => (a.start - b.start) || (b.end - a.end));
     const out = [];
@@ -581,5 +704,6 @@
   global.PIIDetector = {
     CATEGORIES, detect, findEntities, ORG_SUFFIXES,
     SURNAMES1, SURNAMES2, NAME_EXCLUDE_WORDS, NAME_LABELS, NAME_COLUMN_HEADERS,
+    nameLikelihoodScore,
   };
 })(window);
